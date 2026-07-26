@@ -1,0 +1,9 @@
+<!-- Minimal chrome for standalone pages. Unlike chrome.html (whose #body is
+     filled by JS and so is emitted closed), #body is left OPEN here: the page
+     supplies its own static content and must close the div itself. -->
+<header id="header">
+    <div id="pagetitle">
+        <span id="pagetitletext">{{TITLE}}</span>
+    </div>
+</header>
+<div id="body">

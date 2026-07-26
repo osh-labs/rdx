@@ -1,0 +1,56 @@
+<!--#title Inbox -->
+<!--#include head -->
+<!--#include simple-header -->
+<style>
+#body { padding: 15px; }
+b, li { display: block; padding: 5px; margin: 5px; }
+.inboxmsgwrap {
+    background: var(--greyc);
+    margin: 10px;
+    border-radius: 10px;
+    font-size: 15px;
+    word-wrap: break-word;
+    line-height: 19px;
+}
+
+.ibxmeta {
+    font-size: 14px;
+    padding: 10px;
+}
+
+.ibxsub {
+    padding: 10px;
+    background: var(--bodyc);
+    border: 2px solid var(--greyc);
+    font-weight: 600;
+}
+
+.ibxlink {
+    padding: 7px 10px;
+}
+
+.ibxmsg {
+    padding: 5px 10px;
+}
+
+.ibxactions {
+    padding: 10px;
+}
+
+.ibxlink a {
+    color: var(--linkc);
+    text-decoration: none;
+}
+
+.ibxactions span {
+    color: var(--linkc);
+}
+</style>
+<div id="inboxbody"></div>
+</div>
+<!--#include reply-modal -->
+<!--#include scripts -->
+<script>
+inboxto();
+</script>
+<!--#include footer -->
