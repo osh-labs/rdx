@@ -45,6 +45,9 @@ jobs:
           set -euo pipefail
           for f in src/js/*.js; do node --check "$f"; done
 
+      - name: Run tests
+        run: node test/render.test.js
+
       - name: Check build is idempotent
         run: |
           set -euo pipefail

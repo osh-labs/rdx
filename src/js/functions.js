@@ -1,17 +1,26 @@
-var bmr = '';
+'use strict';
 // Utility functions [UNIVERSAL]
 
-var nexturl = ''; var nextseturl = '';
-if(JSON.parse(localStorage.getItem("subs")) !== null){
-subslisted = ''; subslistedarray = JSON.parse(localStorage.getItem("subs")); 
-  subslistedarray.sort(function(a, b) {
-    return a.toLowerCase().localeCompare(b.toLowerCase());
-  });
-for(x in subslistedarray){
-subslisted += '<a href="subreddit.html?r='+subslistedarray[x]+'" class="homelinks">'+subslistedarray[x]+'</a>';
-}
-document.getElementById('subscribed').innerHTML = subslisted;
-}
+var bmr = '';
+var nexturl = '';
+var nextseturl = '';
+var subslist = null;
+
+(function renderSubscribedList() {
+    var stored = JSON.parse(localStorage.getItem("subs"));
+    if (stored === null) { return; }
+    // Not every page has the sidebar (settings, themes, login).
+    var target = document.getElementById('subscribed');
+    if (!target) { return; }
+    var subslisted = '';
+    stored.sort(function(a, b) {
+        return a.toLowerCase().localeCompare(b.toLowerCase());
+    });
+    for (var i = 0; i < stored.length; i++) {
+        subslisted += '<a href="subreddit.html?r='+stored[i]+'" class="homelinks">'+stored[i]+'</a>';
+    }
+    target.innerHTML = subslisted;
+})();
 
 
 function toggletheme(){
@@ -56,7 +65,7 @@ togglefont();
 
 function toggle(id){
 var x = document.getElementsByClassName("show");
-for (k = 0; k < x.length; k++) {
+for (var k = 0; k < x.length; k++) {
 if(x[k].id != id) {
   x[k].classList.toggle("hidden");
   x[k].classList.toggle("show");  }
@@ -74,64 +83,6 @@ document.getElementById("subssearchi").focus();
  // return e.childNodes.length === 0 ? "" : e.childNodes[0].nodeValue;
 //}
 
-function xmakereq(url){
-var fill = '';
-var req = new XMLHttpRequest();
-req.responseType = 'json';
-req.open('GET', url, true);
-req.onload  = function() {
-var jsonResponse = req.response;
-var titlesx = url.replace("https://www.reddit.com/r/", "");
-titlesx = titlesx.replace("/.json", "");
-document.title = titlesx;
-posts = jsonResponse['data']['children'];
-for(var item in posts) {
-//console.log("xx" + item);
-pid =  posts[item]['data'];
-fill += postbuilder(pid);
-}
-fill += '<div class="navigate">';
-var curpage = window.location.href.replace(/\&after.*/,'');
-if(jsonResponse['data']['after'] != null) {
-if(curpage.indexOf("?") === -1) {curpage = curpage+'?a=b';} 
-fill += '<a class="next" href="'+curpage+'&after='+jsonResponse['data']['after']+'">Next page</a><div id="sxpy"></div><div id="sentinel"> </div>';
-nextseturl   = curpage+'&after='+jsonResponse['data']['after'];
-nexturl  = url.split('&after')[0]+"&after="+jsonResponse['data']['after'];
-}
-fill += '</div>';
-document.getElementById('body').innerHTML = fill;
-  document.getElementById('body').insertAdjacentHTML("afterbegin",'<div id="rdxapp" style="display:none;">rdx iPhone app is here <a class="dlbtnapp" href="https://apps.apple.com/us/app/rdx-for-reddit/id6503479190">Install</a> <span class="axeit" onclick="exit();">X</span></div>');
-  runhsl();
-  if(curinfi == "true") {
-    //  console.log('running observe');
-      observe();
-  }
-
-};
-req.onerror = function () {
-    document.getElementById('body').innerHTML = `
-<center style="padding:15px;">
-Last night <b><a href="https://www.reddit.com/r/modnews/comments/1tq9vxo/protecting_communities_from_scrapers_and_platform/">reddit disabled JSON feeds</a> that is affecting your usage of rdx website and app. I am trying to find ways to fix this. Maybe I can fix the apps using some workaround, maybe I can't but I will try. You can keep the apps or get the apps from app stores.<br><br>
-
-Thanks for your support for RDX for over 3 years. A small project that reached millions of people. You can <a href="https://buymeacoffee.com/overdevsapps">buy me a coffee here</a> if rdx has helped you and you want to support it in some way.<br>
-
-You can also try my other apps <a href="https://offchess.com">OffChess - Chess Puzzles</a> and <a href="https://at4klauncher.com">AT4K Android TV Launcher inspired by Apple TV</a>.<br><br>
-
--Avadhesh<br><br>
-
-Old info:<br>
-Can't load content!<br>
-
-<b>You can try the <a href="https://play.google.com/store/apps/details?id=com.overdevs.rdx">Android</a> and <a href="https://apps.apple.com/us/app/rdx-for-reddit/id6503479190">iPhone</a> apps to get around it. If the error persists there too then it's a Reddit problem and probably won't be fixed.</b>
-
-<small>
-There can be multiple reasons for this, your browser's aggressive privacy settings may be blocking the one call to reddit.com RDX makes. This happens usually when you use a VPN/Proxy and/or a privacy focused browser like Firefox.<br>
-Play around with privacy/tracking options or change your browser. If it still doesn't work click the feedback link and send me some info.
-</small>
-</center>`;
-};
-req.send(null);
-}
 var callbackCounter = 0;
 
 // Modified makereq function to use JSONP
@@ -329,7 +280,7 @@ const options = {
         root: null,
         threshold: 1.0 
     };
-cantload = false;
+let cantload = false;
     function callback(entries, observer) {
         entries.forEach(entry => {
             if (entry.isIntersecting) {
@@ -359,18 +310,18 @@ function htmlDecode(input) {
 }
 function timeago(o){var t=Math.floor((new Date-o)/1e3),a=t/31536e3;return a>1?Math.floor(a)+"y":(a=t/2592e3)>1?Math.floor(a)+"mo":(a=t/86400)>1?Math.floor(a)+"d":(a=t/3600)>1?Math.floor(a)+"h":(a=t/60)>1?Math.floor(a)+"m":Math.floor(t)+"s"}
 function addlc(to,data){
-addarr = JSON.parse(localStorage.getItem(to) || '[]');
+const addarr = JSON.parse(localStorage.getItem(to) || '[]');
 addarr.push(data);
 localStorage.setItem(to,JSON.stringify(addarr));
 }
 
 function checklc(to,cfor){
-chkarr = JSON.parse(localStorage.getItem(to) || '[]');
+const chkarr = JSON.parse(localStorage.getItem(to) || '[]');
 return chkarr.includes(cfor);
 
 }
 function removelc(to,cfor){
-addarr = JSON.parse(localStorage.getItem(to) || '[]');
+let addarr = JSON.parse(localStorage.getItem(to) || '[]');
 addarr = addarr.filter(function(item) {
     return item !== cfor
 })
@@ -387,7 +338,7 @@ xhr.onreadystatechange = function()
     if (xhr.readyState === 4 && xhr.status == 200)
     {
         subslist = xhr.response;
-		fillsubs = '';
+		let fillsubs = '';
 		for (var singlesub in subslist['subreddits'] )   
 {
 //console.log(subslist[singlesub]);
@@ -408,10 +359,10 @@ window.location = 'subreddit.html?r=' + subslist['subreddits'][0]['name']+'';}
 }}
 }
 
-function unsubscribe(sub){removelc('subs',sub); subbtn = document.getElementById('subbtn');  
+function unsubscribe(sub){removelc('subs',sub); const subbtn = document.getElementById('subbtn');  
  subbtn.setAttribute( "onclick",  'subscribe(\''+sub+'\')' ); subbtn.innerHTML = 'Subscribe';}
 function subscribe(sub){addlc('subs',sub);
-subbtn = document.getElementById('subbtn');
+const subbtn = document.getElementById('subbtn');
 subbtn.setAttribute( "onclick",  'unsubscribe(\''+sub+'\')' );
  subbtn.innerHTML = 'Unsubscribe';}
 
@@ -426,21 +377,24 @@ function replaceRedditLinks(htmlContent) {
 
 
 function postbuilder(post){
-returnfpost = '';
+// `returnfpost` MUST stay local: this function recurses for crossposts
+// (below), and as an implicit global the recursive call wiped the parent's
+// accumulated markup.
+let returnfpost = '';
  let mode = localStorage.getItem('curmode') || "original";
 if (window.location.href.indexOf("comments.html") != -1) {
  mode = "original";
 }
-timeagoed = timeago(post['created_utc']*1000);
-sticky = post['stickied'] ? " sticky" :" ";
-over18 = '';
+const timeagoed = timeago(post['created_utc']*1000);
+const sticky = post['stickied'] ? " sticky" :" ";
+let over18 = '';
 if(checklc('a18','yes') != true) {
 over18 = post['over_18'] ? "over18" :" ";
 }
-ismod = (post['distinguished'] == "moderator") ? " moderator" :" ";
+const ismod = (post['distinguished'] == "moderator") ? " moderator" :" ";
 returnfpost +=  '<div class="post '+mode+'" id="'+post['id']+'">';
 if(mode == "comp") {
-thumbnail = post['thumbnail'];
+let thumbnail = post['thumbnail'];
 if(thumbnail != "self" && thumbnail != "spoiler" && thumbnail != "default" && thumbnail != ""  && thumbnail != "nsfw") {
 if(thumbnail == "image") {
 thumbnail = post["preview"]['images'][0]['resolutions'][0]['url'];
@@ -466,13 +420,18 @@ var replacedText = replaceRedditLinks(post["selftext_html"]);
 
 returnfpost += '<div class="postc selftext">'+htmlDecode(replacedText)+'</div>';
 }
-urli = post['url_overridden_by_dest'];
+let urli = post['url_overridden_by_dest'];
 if (post['url'] && post['url'].includes('reddit.com/gallery')) {
         urli = post['url'];
     }
 
-if((post['crosspost_parent_list'] != null &&  post['crosspost_parent_list'].length > 0) ||  (typeof  post['crosspost_parent_list'] !== 'undefined' &&  post['crosspost_parent_list'].length > 0)){
-returnfpost += postbuilder(post['crosspost_parent_list'][0]);
+// The old guard was `(x != null && x.length) || (typeof x !== 'undefined' && x.length)`.
+// For x === null the second clause passes the typeof test ("object") and then
+// dereferences null. It only survived because Reddit omits the key rather
+// than sending null.
+const xpost = post['crosspost_parent_list'];
+if(Array.isArray(xpost) && xpost.length > 0){
+returnfpost += postbuilder(xpost[0]);
 }
 else {
 if(over18 === 'over18') {returnfpost += '<button onclick="allown_sfw()" class="sfwtoggle">Click to Allow this content</button>';}
@@ -527,7 +486,9 @@ jdiv.innerHTML += '<div class="displayimg"><img src="'+el.getAttribute('data-msr
 });
 }
 function urlpreview(urli,postjson) {
-returnpost = '';	
+let returnpost = '';
+let vidurl;
+let vidposter;
 	if (urli.match(/.(jpg|jpeg|png)$/i))
 	{
 		returnpost += '<div class="postc singleimage"><img src="'+ urli +'"/></div>';
@@ -554,8 +515,9 @@ else {
 	else if (urli.match(/www.reddit.com\/gallery/g))
 	{
 	returnpost += '<div class="postc gallery">';
-	pjmd = postjson['media_metadata'];
-	pjgd= postjson['gallery_data'];
+	const pjmd = postjson['media_metadata'];
+	const pjgd = postjson['gallery_data'];
+	let g_mimg;
 	const pjmdsorted = {};
 if(pjgd) {
 pjgd.items.forEach((item, index) => {
@@ -570,11 +532,11 @@ let fakect = ' actv';
 	for(var singlept in pjmdsorted) {
 	    
 		if(pjmdsorted[singlept]['status'] != 'failed' && pjmdsorted[singlept]['status'] != 'unprocessed') {
-		singleptlink = pjmdsorted[singlept]['s']['u'];
+		let singleptlink = pjmdsorted[singlept]['s']['u'];
 		if(typeof singleptlink == "undefined"){          singleptlink = pjmdsorted[singlept]['s']['gif'];          }
 		else {
 		singleptlink = singleptlink.replace("preivew.redd", "i.redd");}
-      	singletmlink =  pjmdsorted[singlept]['p']['0']['u'];
+      	const singletmlink =  pjmdsorted[singlept]['p']['0']['u'];
       	if(fakect == ' actv') {
       	g_mimg  = '<img src="'+singleptlink+'" alt="main image" id="mi_'+postjson['id']+'" onclick="galleryopen(\''+postjson['id']+'\')"/>';
       	}
@@ -597,16 +559,9 @@ let fakect = ' actv';
 	{
 	returnpost += '<div class="postc video">';
 		if(postjson['secure_media'] != null) {
-		vidurl =  postjson['secure_media']['reddit_video']['dash_url']; 
-		hlsurl =  postjson['secure_media']['reddit_video']['hls_url']; 
-		fallbackurl = postjson['secure_media']['reddit_video']['fallback_url']; 
-		const wiurl  = postjson['secure_media']['reddit_video']['width']+"px";
-		const heurl = postjson['secure_media']['reddit_video']['height']+"px";
-		if(typeof wiurl != "undefined"){
-		    const wiurl = "100%";
-		    const heurl = "240px";
-		   }
-		//returnpost +='<video id="v'+postjson['id']+'" src="'+vidurl+'" poster="'+postjson["thumbnail"]+'" width="100%" height="240" preload="metadata" onplay="playaud(\'a'+postjson['id']+'\')"  onpause="pauseaud(\'a'+postjson['id']+'\')"  onseeking="pauseaud(\'a'+postjson['id']+'\')"  onseeked="seeked(\''+postjson['id']+'\')"   controls> </video><audio src="'+urli+'/DASH_audio.mp4" id="a'+postjson['id']+'" controls></audio>	';
+		vidurl =  postjson['secure_media']['reddit_video']['dash_url'];
+		const hlsurl =  postjson['secure_media']['reddit_video']['hls_url'];
+		const fallbackurl = postjson['secure_media']['reddit_video']['fallback_url'];
 		vidposter = postjson["preview"];
 		if(typeof vidposter == "undefined"){
 			vidposter = postjson["thumbnail"];
@@ -644,27 +599,6 @@ let fakect = ' actv';
 	}
 	returnpost += '</div>';
 	}
-	else if (urli.match(/gfycat.com/g)){
-	returnpost += '<div class="postc video">';
-	if(postjson['secure_media'] == null || typeof postjson['secure_media']['oembed']['thumbnail_url'] == "undefined" ){
-	
-
-		vidurl = urli.replace("gfycat.com/", "gfycat.com/ifr/");
-		vidurl = '<iframe src="'+vidurl+'?autoplay=0" class="gifframe"></iframe>';
-		returnpost += vidurl;
-	}
-	else {
-		if(typeof postjson['preview']['reddit_video_preview'] != "undefined") {
-		vidurl = postjson['preview']['reddit_video_preview']['fallback_url'];
-		}
-		else if (postjson['secure_media']['oembed']['thumbnail_url']) {
-		vidurl = postjson['secure_media']['oembed']['thumbnail_url'];
-		}
-		vidurl = vidurl.replace("size_restricted.gif", "mobile.mp4")
-		returnpost +='<video src="'+vidurl+'" poster="'+postjson["thumbnail"]+'" width="100%" height="240" preload="metadata" controls> </video>';
-		}
-	returnpost += '</div>';
-	}
 	else if (urli.match(/i.imgur.com(.*?)gifv/g))
 	{
 	returnpost += '<div class="postc video">';
@@ -673,8 +607,8 @@ let fakect = ' actv';
 	returnpost += '</div>';
 	}
 	else {
-	thumbnailforit = '';
-	if(postjson["thumbnail"].length > 9){
+	const thumbnailforit = '';
+	if(postjson["thumbnail"] && postjson["thumbnail"].length > 9){
 		returnpost += '<a href="'+ urli +'" target="_blank" class="wholethumb"><div class="postc thumblink"><div class="thumb"><img src="'+postjson["thumbnail"]+'"/></div><div class="thumblinklink">'+urli +'</div></div></a>';
 	}
 	else {
@@ -687,9 +621,9 @@ let fakect = ' actv';
 
 
 function pollbuilder(postjson) {
-	returnpoll = '<div class="poll">';
-	for(popt in postjson['poll_data']['options']){
-		vote_count = postjson['poll_data']['options'][popt]['vote_count'];
+	let returnpoll = '<div class="poll">';
+	for(const popt in postjson['poll_data']['options']){
+		let vote_count = postjson['poll_data']['options'][popt]['vote_count'];
 		"undefined"==typeof vote_count&&(vote_count=" ");
 		returnpoll += '<div class="polloption"><span class="polloptiontext">'+postjson['poll_data']['options'][popt]['text']+'</span> <span  class="votecount">'+vote_count+'</span>';
 		if(vote_count != ' '){
@@ -721,13 +655,13 @@ function getget(name, url = window.location.href) {
 }
 
 function cbuilder(comment){
-timeagoed = timeago(comment['created_utc']*1000);
-isop = comment['is_submitter'] == true ? "isop" : "";
-ismod = comment['distinguished'] == 	" moderator" ? "ismod" : "";
+const timeagoed = timeago(comment['created_utc']*1000);
+const isop = comment['is_submitter'] == true ? "isop" : "";
+const ismod = comment['distinguished'] == 	" moderator" ? "ismod" : "";
 
 
- 
-cret = '<div class="comment ccp'+comment['depth']+'" id="'+comment['id']+'"><div class="comment_author"><span class="authorttext '+isop+''+ismod+'"><a class="authorlink" href="user.html?u='+ comment['author'] +'">'+ comment['author'] +'</a></span>  <span class="comment_meta">'+ comment['score'] +' votes &bull; '+timeagoed+' </span></div><div class="comment_text">'+ replaceRedditLinks(htmlDecode(comment['body_html'])) +'</div>';
+
+let cret = '<div class="comment ccp'+comment['depth']+'" id="'+comment['id']+'"><div class="comment_author"><span class="authorttext '+isop+''+ismod+'"><a class="authorlink" href="user.html?u='+ comment['author'] +'">'+ comment['author'] +'</a></span>  <span class="comment_meta">'+ comment['score'] +' votes &bull; '+timeagoed+' </span></div><div class="comment_text">'+ replaceRedditLinks(htmlDecode(comment['body_html'])) +'</div>';
 if(localStorage.getItem('refreshToken') != null){
 cret += '<div class="comment-reply"><span onclick="replyto(\'t1_'+comment['id']+'\')">Reply</span>';
 if(localStorage.getItem('userName') == comment['author']){
@@ -1089,22 +1023,25 @@ console.log(inboxMessages);
     let html = '';
 
   inboxMessages.forEach((item) => {
-    const { kind, inboxMessages: { author, created_utc, subject, link_title, body_html, tname, context } } = item;
+    // Each Listing child is {kind, data}. The old code destructured
+    // `item.inboxMessages`, which does not exist, so this threw on every
+    // message. The reply target is `name` (a fullname like t1_abc), not
+    // `tname`, and body_html arrives HTML-escaped so it needs decoding.
+    const kind = item.kind;
+    const { author, created_utc, subject, link_title, body_html, name, context } = item.data;
     const date = new Date(created_utc * 1000);
-    const formattedDate = `${date.getDate()}/${date.getMonth() + 1}/${date.getFullYear()} - ${date.getHours()}:${date.getMinutes()}`;
+    const pad = (n) => String(n).padStart(2, '0');
+    const formattedDate = `${date.getDate()}/${date.getMonth() + 1}/${date.getFullYear()} - ${date.getHours()}:${pad(date.getMinutes())}`;
+    const bodyHtml = body_html ? replaceRedditLinks(htmlDecode(body_html)) : '';
 
-    if (kind === 't1') {
+    if (kind === 't1' || kind === 't4') {
       html += `<div class="inboxmsgwrap"><div class="ibxmeta"><span class="ibxauthor"><a href="user.html?u=${author}">u/${author}</a> &bull;  <span class="ibxtime">${formattedDate}</span></span></div>`;
-      html += `<div class="ibxsub">${subject}</div>`;
-      html += `<div class="ibxlink"><a href="comments.html?url=https://www.reddit.com${context}">${link_title}</a></div>`;
-      html += `<div class="ibxmsg">${body_html}</div>`;
-      html += `<div class="ibxactions"><button onclick="replyto('${tname}')">Reply</button></div></div>`;
-    } else if (kind === 't4') {
-      html += `<div class="inboxmsgwrap"><div class="ibxmeta"><span class="ibxauthor"><a href="user.html?u=${author}">u/${author}</a> &bull;  <span class="ibxtime">${formattedDate}</span></span></div>`;
-      html += `<div class="ibxsub">${subject}</div>`;
-      html += `<div class="ibxmsg">${body_html}</div></div>`;
-      html += `<div class="ibxactions"><button onclick="replyto('${tname}')">Reply</button></div></div>`;
-
+      html += `<div class="ibxsub">${subject || ''}</div>`;
+      if (kind === 't1' && context) {
+        html += `<div class="ibxlink"><a href="comments.html?url=https://www.reddit.com${context}">${link_title || 'View context'}</a></div>`;
+      }
+      html += `<div class="ibxmsg">${bodyHtml}</div>`;
+      html += `<div class="ibxactions"><button onclick="replyto('${name}')">Reply</button></div></div>`;
     }
   });
 document.getElementById('inboxbody').innerHTML = html;
@@ -1117,8 +1054,8 @@ document.getElementById('inboxbody').innerHTML = html;
 }
 
 window.onload = function(){
-	curq = getget('q') ? getget('q'): '';
-	html1  =          '<form class="search" action="search.html"><input type="search" name="q" value="'+curq+'"/>';
+	const curq = getget('q') ? getget('q'): '';
+	let html1  =          '<form class="search" action="search.html"><input type="search" name="q" value="'+curq+'"/>';
 	html1 += '<input type="submit" value="Search"/><br style="clear:both;">';
 	    if (window.location.href.indexOf("?r=") > -1 || window.location.href.indexOf("&r=") > -1) {
     html1 += '<input type="checkbox" id="chk1" name="r" value="'+getget('r')+'" checked><label for="chk1"> Only search r/'+getget('r')+'</label>';
@@ -1128,7 +1065,7 @@ window.onload = function(){
     }
 	
 		    if (window.location.href.indexOf("/r/") > -1) {
-				ther = window.location.href.match(/r\/(.*?)\//s)[1];
+				const ther = window.location.href.match(/r\/(.*?)\//s)[1];
     html1 += '<input type="checkbox" id="chk1" name="r" value="'+ther+'" checked><label for="chk1"> Only search r/'+ther+'</label>';
     }
 	html1 += '</form>';

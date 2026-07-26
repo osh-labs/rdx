@@ -85,71 +85,53 @@ function doit(){
     document.head.appendChild(script);
 }
 
-function handlerepliesmn(repliesca){
-replieslsa = repliesca['data']['children'];
-for( replyxy in replieslsa) {
-if(replieslsa[replyxy]['kind'] == "more"){
-fill += '<div class="comment ccp'+ replieslsa[replyxy]['data']['depth'] +'"><div class="comment_author"><a href="?url=https://www.reddit.com'+ repliesls[replyx]['data']['permalink'] +' " target="_blank">View other replies</a></div></div>';
-}
-else {
-fill += cbuilder(replieslsa[replyxy]['data']);
-replieshha  = replieslsa[replyxy]['data']['replies'];
-if(typeof replieshha === 'object' && replieshha !== null){
-fill+= '<a class="viewmore" href="?url=https://www.reddit.com'+replieslsa[replyxy]['data']['permalink']+'" target="_blank">view more replies</a>';
-}
-}}
-}
-
-
-function handlerepliesm(repliesc){
-repliesls = repliesc['data']['children'];
-
-for( replyx in repliesls) {
-if(repliesls[replyx]['kind'] == "more"){
-fill += '<div class="comment ccp'+ repliesls[replyx]['data']['depth'] +'"><div class="comment_author"><a href="?url=https://www.reddit.com'+ repliesl[reply]['data']['permalink'] +' " target="_blank">View other replies</a></div></div>';
-}
-else {
-fill += cbuilder(repliesls[replyx]['data']);
-replieshh  = repliesls[replyx]['data']['replies'];
-if(typeof replieshh === 'object' && replieshh !== null){
-handlerepliesmn(replieshh);
-}
-}}
-}
-
-function handlereplies(replies){
-repliesl = replies['data']['children'];
-for( reply in repliesl) {
-//console.log("yy" + reply);
-if(repliesl[reply]['kind'] == "more"){
-fill += '<div class="comment ccp'+ repliesl[reply]['data']['depth'] +'"><div class="comment_author"><a href="?url=https://www.reddit.com'+ comments[item]['data']['permalink'] +' " target="_blank">View other replies</a></div></div>';
-}
-else {
-fill += cbuilder(repliesl[reply]['data']);
-repliesz  = repliesl[reply]['data']['replies'];
-if(typeof repliesz === 'object' && repliesz !== null){
-handlerepliesm(repliesz);
-}
-}}
+// Renders a reply tree. Replaces three near-identical functions (one per
+// nesting level, capped at 3 deep) that each built the "View other replies"
+// link from the ENCLOSING level's loop variables rather than their own -- so
+// the link pointed at whichever comment that variable happened to hold.
+//
+// A `more` node carries no permalink of its own, which is why the original
+// reached outward. The parent's permalink is now passed down explicitly, and
+// recursion replaces the hand-unrolled levels (the CSS styles ccp0-ccp5).
+function handlereplies(replies, parentPermalink){
+    const children = replies['data']['children'];
+    for (const idx in children) {
+        const node = children[idx];
+        if (node['kind'] == "more") {
+            fill += '<div class="comment ccp'+ node['data']['depth'] +'"><div class="comment_author"><a href="?url=https://www.reddit.com'+ parentPermalink +'" target="_blank">View other replies</a></div></div>';
+        } else {
+            const data = node['data'];
+            fill += cbuilder(data);
+            const nested = data['replies'];
+            if (typeof nested === 'object' && nested !== null) {
+                handlereplies(nested, data['permalink']);
+            }
+        }
+    }
 }
 
 function loadcomments(comments){
-for( item in comments) {
-console.log(comments[item].kind);
-if(comments[item].kind == 'more'){
-morejson = comments[item].data.children;
-document.getElementById('paginate').innerHTML =  '<button onclick="loadmore()" id="loadmore1">Load More</button>';
+for (const item in comments) {
+    const node = comments[item];
+    // A top-level `more` node is the "Load More" pagination stub, not a
+    // comment. The old code set up the button and then ALSO ran it through
+    // cbuilder, rendering an empty comment with no author or body.
+    if (node.kind == 'more') {
+        morejson = node.data.children;
+        document.getElementById('paginate').innerHTML = '<button onclick="loadmore()" id="loadmore1">Load More</button>';
+        continue;
+    }
+    const data = node['data'];
+    fill += cbuilder(data);
+    const replies = data['replies'];
+    if (typeof replies === 'object' && replies !== null) {
+        handlereplies(replies, data['permalink']);
+    }
 }
-
-fill += cbuilder(comments[item]['data']); 
-replies  = comments[item]['data']['replies'];
- if(typeof replies === 'object' && replies !== null){
-handlereplies(replies);
-}}
 document.getElementById('body').innerHTML += '<div class="clear"></div>'+fill;
-commentsdivs =   document.getElementById('body').getElementsByClassName('comment');
-for(i=0; i < commentsdivs.length; i++) {
-commentsdivs[i].addEventListener('dblclick', collapse);
+const commentsdivs = document.getElementById('body').getElementsByClassName('comment');
+for (let i = 0; i < commentsdivs.length; i++) {
+    commentsdivs[i].addEventListener('dblclick', collapse);
 }
 }
 
@@ -176,7 +158,7 @@ function loadmore(){
     // Create unique callback name
     const callbackName = 'jsonp_loadmore_' + (++callbackCounter);
     
-    let jsonpUrl = 'https://www.reddit.com/r/'+thisthread['subreddit']+'/api/morechildren.json?api_type=json&link_id='+thisthread['name']+'&limit=500&r=AskReddit&children='+urljson+'&jsonp=' + callbackName;
+    let jsonpUrl = 'https://www.reddit.com/r/'+thisthread['subreddit']+'/api/morechildren.json?api_type=json&link_id='+thisthread['name']+'&limit=500&r='+thisthread['subreddit']+'&children='+urljson+'&jsonp=' + callbackName;
 
     // Create global callback function
     window[callbackName] = function(jsonResponse) {
