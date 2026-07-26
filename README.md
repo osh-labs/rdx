@@ -1,50 +1,139 @@
-# RDX for reddit
-RDX for reddit is a lightweight mobile/web viewer for Reddit, inspired by apollo.
-Try it here -> https://rdx.overdevs.com
-## RDX - Read-Only, Fast, Open Source Reddit Viewer
+# rdx — self-hosted Reddit reader
 
-Welcome to RDX, your ultimate read-only, open-source Reddit viewing experience inspired by Apollo. Designed with a focus on simplicity, speed, and user experience, RDX aims to provide Reddit enthusiasts with a seamless browsing experience without distractions. Visit [rdx.overdevs.com](https://rdx.overdevs.com) to start exploring Reddit in a clean, minimalistic interface.
+A fork of [overdevs/rdx](https://github.com/avadhesh18/rdx), rebuilt to run as a
+private single-user instance against Reddit's authenticated API.
 
-## Features
-<img src="https://lemmy.world/pictrs/image/68e2d6d3-c827-478a-befe-e66c88fc21a5.png" alt="rdx for reddit" width="250">
+Upstream is abandoned. In May 2026 Reddit
+[shut down unauthenticated `.json` endpoints](https://www.reddit.com/r/modnews/comments/1tq9vxo/protecting_communities_from_scrapers_and_platform/),
+which is what the original depended on entirely, and it has not worked since.
+This fork reads Reddit through your own account instead.
 
-- **Ad/Pop-up Free Browsing**: Enjoy Reddit without any ads cluttering your screen.
-- **Mobile Optimized**: Built to work smoothly on lower end smartphones, looks great on desktop too.
-- **Import Subscriptions**: Easily import your subscriptions from Reddit to keep your feed personalized.
-- **Save Posts**: Bookmark your favorite posts for easy access later.
-- **Share Button**: Share interesting finds with friends and communities effortlessly.
-- **Enhanced Video/GIF Playback**: Supports HLS/DASH/Reddit hosted/Giphu/Imgur/Redgifs videos for a smooth viewing experience.
-- **Improved Search**: Find exactly what you're looking for with an enhanced search feature.
-- **Compact Mode**: For those who prefer a denser look, compact mode reduces thumbnail sizes for faster loading.
-- **Infinite Scrolling**: Scroll endlessly through your Reddit feed without interruptions.
-- **Custom Themes and Fonts**: Personalize your viewing experience with elegant themes and fonts beyond the basic dark and light modes.
+## What it is
 
+A static site. No backend, no database, no build toolchain, no dependencies.
+`build.sh` (bash + coreutils) assembles `src/` into `dist/`; nginx serves it;
+**your browser talks to Reddit directly.** The server never contacts Reddit and
+holds no credentials.
 
+That last point matters for hosting: because the API calls originate in your
+browser, the instance's own IP address is never seen by Reddit, so datacenter-IP
+reputation is not a factor.
 
+## Requirements
 
-## Community and Support
+- A Reddit account.
+- Somewhere to serve static files. A `t4g.nano` is ample.
+- HTTPS. Reddit requires an `https://` OAuth redirect URI (only `localhost` is
+  exempt), and holding a refresh token over plain HTTP is indefensible.
 
-The development and improvement of RDX are significantly driven by community feedback. I invite our users to contribute ideas, report issues, or just share their experiences. Your input helps us make RDX better for everyone.
+## Setup
 
-## Challenges and Solutions
+```bash
+git clone <this repo> && cd rdx
+./build.sh                       # -> dist/
+python3 -m http.server -d dist   # or deploy properly, see below
+```
 
-- **VPN Issue**: Some users may encounter a blank page due to their browser's CORS policy or because they use a VPN. I recommend using a browser add-on to disable CORS for RDX, or adjusting browser privacy settings to mitigate this issue.
-- **Privacy and Tracking**: This fork contains no analytics or tracking of any kind. The Cloudflare Web Analytics beacon and Google reCAPTCHA present in upstream have been removed. See `docs/analytics-removal.md` for what was removed and which third-party callouts remain.
+Then open the site, go to **Connect Reddit account**, and follow the four steps
+it shows. In short:
 
+1. At [reddit.com/prefs/apps](https://www.reddit.com/prefs/apps), create an app
+   of type **installed app**.
+2. Set the redirect URI to exactly the value the login page displays.
+3. Copy the client ID — the string under the app name, *not* the secret.
+4. Paste it in and authorise.
 
-## Acknowledgments
+An installed app is a public OAuth client, so there is no secret to enter or
+store anywhere. The client ID and tokens stay in your browser's `localStorage`.
 
-Special thanks to the Lemmy community and Reddit users who have supported and used RDX. Your feedback and suggestions have been instrumental in shaping RDX into what it is today.
+### Deploying privately
 
-## Support RDX
+The recommended shape is nginx bound to loopback, published over Tailscale:
 
-<a rel="nofollow" href="https://www.buymeacoffee.com/overdevsapps" class="bmac"><img src="https://rdx.overdevs.com/bmac.png" width="150" alt="donate"></a>
+```bash
+sudo mkdir -p /var/www/rdx && sudo chown "$USER" /var/www/rdx
+sudo cp deploy/nginx.conf /etc/nginx/conf.d/rdx.conf
+sudo nginx -t && sudo systemctl reload nginx
+./deploy/deploy.sh
+sudo tailscale serve --bg --https=443 http://127.0.0.1:8080
+```
 
-If you like RDX and want to support its development, <a href="https://www.buymeacoffee.com/overdevsapps">consider donating</a>. While not expected, donations help cover the costs associated with maintaining and improving the service. Every bit of support is greatly appreciated.
+Tailscale terminates TLS with a real Let's Encrypt certificate for the
+`*.ts.net` name, so there is no certbot, no DNS, and no public listener. The
+security group needs no inbound rule at all.
 
----
+**Keep it private.** Reddit's free API tier is 100 queries/minute per client ID
+and is for non-commercial personal use. One person browsing is nowhere near
+that. Serving other people's browsing through your client ID is what turns a
+personal tool into a service.
 
-Start browsing Reddit the way it was meant to be - clean, simple, and focused on the content. Visit [rdx.overdevs.com](https://rdx.overdevs.com) today. For updates, follow us on [GitHub](https://github.com/overdevs/RDX).
+## What changed from upstream
 
-*Note: RDX is a third-party Reddit viewer and is not affiliated with Reddit Inc.*
-![screenshots](https://github.com/avadhesh18/rdx/assets/7838916/18b4a086-2586-4d49-9c89-03f8bd09a7e7)
+**Transport.** Every JSONP and XHR call site now goes through the authenticated
+API at `oauth.reddit.com`. JSONP was doubly dead — the endpoints return 403, and
+a `<script src>` tag cannot carry an `Authorization` header.
+
+**Authentication.** Installed-app flow with no client secret, a derived redirect
+URI, a real CSRF state nonce, serialised token refresh, and the `read` scope
+that upstream never requested (without it, every content request 403s).
+
+**Features that authentication makes real**, replacing local-only stand-ins:
+
+| Upstream | Here |
+|---|---|
+| Subscriptions in `localStorage`, imported by pasting a bookmarklet into old.reddit.com | Your actual Reddit subscriptions, synced, with working sub/unsub |
+| Home feed built as `r/sub1+sub2+sub3` (breaks past URL length limits) | Your real front page |
+| Saved posts in `localStorage`, invisible to Reddit | Real Reddit saves |
+| `vote` scope requested but no vote UI | Upvote/downvote on posts and comments |
+
+**Privacy.** All analytics removed — see [`docs/analytics-removal.md`](docs/analytics-removal.md).
+dash.js is vendored and lazy-loaded; the Google Fonts picker is replaced with
+system font stacks. A page load reaches exactly two origins: yours and Reddit's.
+The shipped nginx config sets a CSP whose `connect-src` is restricted to Reddit,
+so injected script cannot exfiltrate your token.
+
+**Build.** `run.php` is gone. It only built 5 of the 15 pages; the rest were
+hand-maintained copies in `public/`, which is where the duplication came from.
+All pages are now sources under `src/pages/`.
+
+**Bugs.** Several latent ones fixed — see the Phase 3 commit and
+[`docs/implementation-plan.md`](docs/implementation-plan.md).
+
+## Layout
+
+```
+build.sh            bash build: src/ -> dist/
+src/pages/          all 11 pages
+src/partials/       shared head, chrome, footer, reply modal
+src/js/auth.js      OAuth token lifecycle + redditFetch()
+src/js/api.js       endpoint construction
+src/js/functions.js rendering and UI
+src/vendor/         dash.js (vendored, lazy-loaded)
+assets/             icons and manifest
+deploy/             nginx config and deploy script
+test/               node tests, no framework
+docs/               evaluation, implementation plan, analytics audit
+```
+
+## Tests
+
+```bash
+node test/render.test.js   # rendering, against fixtures
+node test/api.test.js      # every constructed endpoint URL
+node test/smoke.test.js    # loads all 11 pages in headless Chromium
+```
+
+The smoke test fails on any uncaught exception, console error, or request to an
+offsite host. It needs playwright (`npm install --no-save playwright`) and skips
+cleanly if absent.
+
+There is deliberately no `package.json`; the tests are plain Node.
+
+## Status
+
+Code-complete and verified as far as it can be without credentials. Everything
+that requires a live Reddit token — the OAuth round trip, real listings, media
+rendering, writes — needs a manual pass. The checklist is in
+[`docs/implementation-plan.md`](docs/implementation-plan.md) §11.
+
+*Not affiliated with Reddit Inc.*

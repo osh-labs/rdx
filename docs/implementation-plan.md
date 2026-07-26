@@ -257,7 +257,7 @@ Carried from the evaluation, all confirmed by reading:
 | Location | Bug | Fix |
 |---|---|---|
 | `functions.js:1092` | Destructures `item.inboxMessages`, which does not exist; throws on every message | Should be `item.data` |
-| `functions.js:429` | `returnfpost` is an implicit global; `postbuilder` recurses for crossposts (`:475`) and clobbers the parent's accumulated string | Make it a local `let` |
+| `functions.js:425` | Crosspost guard's second clause defeats its own null check: for `crosspost_parent_list === null` it passes `typeof x !== 'undefined'` and then reads `null.length`, throwing and killing the render | Use `Array.isArray()` |
 | `comments.html:133` | `handlerepliesmn` reads `repliesls[replyx]` from the wrong scope | Use its own loop variable |
 | `comments.html:150` | `handlerepliesm` reads `repliesl[reply]` from the wrong scope | Same |
 | `login.html:57` vs `:145` | Says "3 seconds", timer is 20000 ms | 3000 ms |

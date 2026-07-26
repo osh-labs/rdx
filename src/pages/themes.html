@@ -185,51 +185,13 @@ span#outfnm {
     margin: 0px 5px;
 ">Change font</div>
 <select name="font" id="fnm" onchange="changedfont();">
-<option value="em">Select a font</option>
- <optgroup label="Default font (fastest)">
-<option value="default">default</option>
-</optgroup>
- <optgroup label="Dyslexia friendly">
-<option value="Lexend">Lexend</option>
-</optgroup>
- <optgroup label="Sans-serif">
-   <option value="Jost">Jost</option>
-  <option value="Arimo">Arimo</option>
- <option value="Roboto">Roboto</option>
-<option value="Raleway">Raleway</option>
-<option value="Inter">Inter</option>
-<option value="Oswald">Oswald</option>
-<option value="Poppins">Poppins</option>
-<option value="Nunito">Nunito</option>
-<option value="Inconsolata">Inconsolata</option>
-<option value="Outfit">Outfit</option>
-<option value="Mulish">Mulish</option>
-<option value="Ubuntu">Ubuntu</option>
-<option value="Quicksand">Quicksand</option>
-<option value="Rubik">Rubik</option>
-<option value="Varela">Varela</option>
-</optgroup>
- <optgroup label="Serif">
-  <option value="Alice">Alice</option>
- <option value="Merriweather">Merriweather</option>
-<option value="Lora">Lora</option>
-<option value="Bitter">Bitter</option>
-<option value="Neuton">Neuton</option>
-<option value="Philosopher">Philosopher</option>
-<option value="Spectral">Spectral</option>
-<option value="Cardo">Cardo</option>
-</optgroup>
- <optgroup label="Handwriting">
-  <option value="Pacifico">Pacifico</option>
-  <option value="Handlee">Handlee</option>
-
- <option value="Dosis">Dosis</option>
-<option value="Caveat">Caveat</option>
-<option value="Satisfy">Satisfy</option>
-<option value="Kalam">Kalam</option>
-<option value="Cookie">Cookie</option>
-<option value="Mynerve">Mynerve</option>
-</optgroup>
+<option value="default">Default (sans-serif)</option>
+<option value="system">System UI</option>
+<option value="grotesque">Grotesque (Helvetica / Arial)</option>
+<option value="humanist">Humanist (Optima / Candara)</option>
+<option value="serif">Serif (Georgia / Times)</option>
+<option value="slab">Slab serif (Bookman / Rockwell)</option>
+<option value="mono">Monospace</option>
 </select> <span id="outfnm"></span>
  
            
@@ -246,16 +208,14 @@ span#outfnm {
    
    
 </div>
+<!--#include scripts -->
     <script>
   
-        var curfont = localStorage.getItem('fname') || "Default";
-document.getElementById('outfnm').innerHTML = "Current: " + curfont;
 function changedfont() {
-if(document.getElementById('fnm').value == "em") {return false;}
-localStorage.setItem('fname',document.getElementById('fnm').value);
-document.getElementById('outfnm').innerHTML = "Current: "+document.getElementById('fnm').value;
-
-togglefont();
+    var chosen = document.getElementById('fnm').value;
+    localStorage.setItem('fname', chosen);
+    document.getElementById('outfnm').innerHTML = 'Saved';
+    togglefont();
 }
 
 
@@ -300,28 +260,10 @@ document.documentElement.style.setProperty('--lightc', '#444');
 }
 }
 function togglefont(){
-const curfont = localStorage.getItem('fname') || "default";
-
-   var fontOptions = document.querySelectorAll('#fnm option');
-        fontOptions.forEach(option => option.removeAttribute('selected'));
-        currfont = document.getElementById('fnm').value;
-        var selectedFontOption = document.querySelector(`#fnm option[value="${curfont}"]`);
-        if (selectedFontOption) {
-            selectedFontOption.setAttribute('selected', 'selected');
-        }
-        
-        
-if(curfont != 'default' && curfont != "Default"){
-const le = document.createElement('link');
-le.rel = 'stylesheet';
-le.href = 'https://fonts.googleapis.com/css2?family='+curfont+'&display=swap';
-document.head.appendChild(le);
-document.body.style.fontFamily = curfont+', sans-serif';
-}
-else {
-document.body.style.fontFamily = 'sans-serif';
-}
-
+    var curfont = localStorage.getItem('fname') || 'default';
+    var sel = document.getElementById('fnm');
+    if (sel) { sel.value = curfont; }
+    document.body.style.fontFamily = fontStack(curfont);
 }
 togglefont();
 toggletheme();

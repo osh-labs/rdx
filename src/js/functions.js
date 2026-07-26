@@ -116,15 +116,28 @@ document.documentElement.style.setProperty('--greyc', '#eee');
 document.documentElement.style.setProperty('--lightc', '#444');
 }
 }
-function togglefont(){
-const curfont = localStorage.getItem('fname') || "default";
-if(curfont != 'default'){
-const le = document.createElement('link');
-le.rel = 'stylesheet';
-le.href = 'https://fonts.googleapis.com/css2?family='+curfont+'&display=swap';
-document.head.appendChild(le);
-document.body.style.fontFamily = curfont+', sans-serif';
+// Font choices are system stacks, not webfonts. Upstream offered ~20 Google
+// Fonts and injected a <link> to fonts.googleapis.com on every page load that
+// used one, disclosing your IP and the page you were on to Google. Vendoring
+// that many families would add megabytes to a deliberately small app, so the
+// picker now offers stacks that are already on the device.
+var FONT_STACKS = {
+    'default': 'sans-serif',
+    'system': 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
+    'grotesque': 'Helvetica, Arial, sans-serif',
+    'humanist': 'Optima, Candara, "Segoe UI", Tahoma, sans-serif',
+    'serif': 'Georgia, "Times New Roman", Times, serif',
+    'slab': '"Bookman Old Style", Rockwell, Georgia, serif',
+    'mono': 'ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace',
+};
+
+function fontStack(name) {
+    return FONT_STACKS[name] || FONT_STACKS['default'];
 }
+
+function togglefont(){
+    var curfont = localStorage.getItem('fname') || 'default';
+    document.body.style.fontFamily = fontStack(curfont);
 }
 
 var curinfi = localStorage.getItem('curinfi') || false;

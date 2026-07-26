@@ -166,7 +166,9 @@ Things you should know about before building on this fork. None are blockers; se
 **Actual bugs:**
 
 - **`functions.js:1092` — inbox is broken.** `const { kind, inboxMessages: { author, ... } } = item` destructures a property named `inboxMessages` off each item, which doesn't exist. It should be `data`. This throws on every message.
-- **`functions.js:429` — `postbuilder` recursion corrupts state.** `returnfpost` is an implicit global (no `var`/`let`). At line 475, `postbuilder` calls itself for crossposts, which resets and overwrites the parent's accumulated string. Crossposted content renders wrong.
+- **`functions.js:425` — the crosspost guard dereferences null.** The condition is `(x != null && x.length > 0) || (typeof x !== 'undefined' && x.length > 0)`. When `crosspost_parent_list` is `null`, the first clause short-circuits safely but the second passes its `typeof` test (`typeof null === 'object'`) and then reads `null.length`, throwing and killing the whole render. It survives in production only because Reddit omits the key rather than sending it null.
+
+  > **Correction.** An earlier version of this document claimed instead that `returnfpost` being an implicit global corrupted crosspost rendering. That was wrong: `a += f()` evaluates `a` before calling `f()`, so the parent's accumulated markup is captured first and restored by the assignment. Making it a local is still correct — strict mode requires the declaration, and a shared accumulator across a recursive call is fragile — but it was not fixing an active bug. The null guard above is the real defect in that block, and it was found by writing fixtures rather than by reading.
 - **`comments.html:133` and `:150` — undefined variable references.** `handlerepliesmn` reads `repliesls[replyx]`, and `handlerepliesm` reads `repliesl[reply]`, both from the wrong scope. The "View other replies" links at deep nesting are wrong or throw.
 - **`login.html:57` vs `:145`** — the page says "Redirecting you in 3 seconds", the timer is set to 20,000 ms.
 
