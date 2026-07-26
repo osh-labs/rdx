@@ -29,7 +29,7 @@ The development and improvement of RDX are significantly driven by community fee
 ## Challenges and Solutions
 
 - **VPN Issue**: Some users may encounter a blank page due to their browser's CORS policy or because they use a VPN. I recommend using a browser add-on to disable CORS for RDX, or adjusting browser privacy settings to mitigate this issue.
-- **Privacy and Tracking**: RDX respects user privacy and operates with minimal tracking(Cloudflare anonymous analytics). If you encounter issues related to aggressive privacy settings in your browser, consider adjusting them or consult the browser's console for more information.
+- **Privacy and Tracking**: This fork contains no analytics or tracking of any kind. The Cloudflare Web Analytics beacon and Google reCAPTCHA present in upstream have been removed. See `docs/analytics-removal.md` for what was removed and which third-party callouts remain.
 
 
 ## Acknowledgments

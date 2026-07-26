@@ -10,7 +10,6 @@
     <meta   name="apple-mobile-web-app-status-bar-style" content="default" />
      <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0">
     <meta charset="utf-8">
-    <script src="https://www.google.com/recaptcha/api.js" async defer></script>
 
     <link rel="stylesheet" href="styles.css" type="text/css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/dashjs/4.7.1/dash.all.min.js"></script>
@@ -66,19 +65,11 @@ p {
     <input type="text" name="name" placeholder="Name" class="bfii" required>
         <input type="email" name="email" placeholder="E-mail" class="bfii" required>
         <textarea name="message" placeholder="Your message" class="bfit" id="txt" required></textarea>
-          <div class="g-recaptcha" data-sitekey="6Ld4JBgoAAAAAJnSjUrI84em4zJ4m3A9rfPsBUwd"></div>
 
 <input type="submit" class="bfis">
     </form>
     </div>
     <script>
-            const textarea = document.getElementById('txt');
-textarea.value = '\n\n\n\n\n\n';
-        textarea.value += `User Agent: ${navigator.userAgent}\n`;
-        textarea.value += `Browser Language: ${navigator.language}\n`;
-        textarea.value += `Screen Resolution: ${window.screen.width}x${window.screen.height}\n`;
-        textarea.value += `Window Size: ${window.innerWidth}x${window.innerHeight}\n`;
-
 function toggletheme(){const t=localStorage.getItem('tname')||"default";if(t!='default'){for(let e of ['bodyc','textc','linkc','greyc','lightc'])document.documentElement.style.setProperty('--'+e,localStorage.getItem(e))}
 else{for(let e of ['bodyc','textc','linkc','greyc','lightc'])document.documentElement.style.setProperty('--'+e,['white','black','#27598c','#eee','#444'][['bodyc','textc','linkc','greyc','lightc'].indexOf(e)])}}
 function togglefont(){const f=localStorage.getItem('fname')||"default";if(f!='default'){const l=document.createElement('link');l.rel='stylesheet';l.href='https://fonts.googleapis.com/css2?family='+f+'&display=swap';document.head.appendChild(l);document.body.style.fontFamily=f+',sans-serif'}
