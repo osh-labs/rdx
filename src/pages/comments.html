@@ -3,86 +3,60 @@
 <!--#include chrome -->
 <div id="paginate"></div>
 <script>
+var fill = '';
+var morejson = [];
+var pagenum = 0;
 
-// Global callback counter for unique callback names
-var callbackCounter = 0;
-
-function getget(name, url = window.location.href) {
-    name = name.replace(/[\[\]]/g, '\\$&');
-    var regex = new RegExp('[?&]' + name + '(=([^&#]*)|&|#|$)'),
-        results = regex.exec(url);
-    if (!results) return null;
-    if (!results[2]) return '';
-    return decodeURIComponent(results[2].replace(/\+/g, ' '));
+// Resolve the target thread from the ?url= parameter. Only the path matters
+// now -- the host is always oauth.reddit.com -- so the old rewrites for the
+// amp/m/i/old.reddit.com hostnames collapse into "take the pathname".
+function permalinkFromUrl(raw) {
+    if (!raw) { return null; }
+    try {
+        return new URL(raw, 'https://www.reddit.com').pathname;
+    } catch (e) {
+        return raw.charAt(0) === '/' ? raw : null;
+    }
 }
 
-
-var fill = '';
-var sr = '';
-var thisthread;
-var defaultsort;
-
-// Modified doit function to use JSONP
 function doit(){
-    url = getget('url');
-    roqs = url.split('?');
-    url = roqs[0];
-    roqs = roqs[1] || '';
-    url = url.replace(/https:\/\/reddit.com/g, 'https://www.reddit.com');
-    url = url.replace(/amp.reddit.com/g, 'www.reddit.com');
-    url = url.replace(/m.reddit.com/g, 'www.reddit.com');
-    url = url.replace(/i.reddit.com/g, 'www.reddit.com');
-    url = url.replace(/www.reddit.com/g, 'www.reddit.com');
-    
-    links = '<a href="comments.html?url='+url+'&sort=new">New</a><a href="comments.html?url='+url+'&sort=best">Best</a><a href="comments.html?url='+url+'&sort=top">Top</a><a href="comments.html?url='+url+'&sort=controversial">Controversial</a><a href="comments.html?url='+url+'&sort=old">Old</a><a href="comments.html?url='+url+'&sort=qa">QnA</a><a onclick="saveit(this)" id="sharebutton" style="border-top: 5px solid var(--greyc);">Save</a><a onclick="shareit();" id="sharebutton">Share</a>';
-    document.getElementById('rightbar').innerHTML = links;
-    
-    let jsonpUrl = url+'.json?limit=500';
-    if(getget('sort') != null){
-        jsonpUrl = jsonpUrl+'&sort='+getget('sort');
+    var raw = getget('url');
+    var permalink = permalinkFromUrl(raw);
+    if (!permalink) {
+        document.getElementById('body').innerHTML =
+            '<div class="notice"><p>No post specified.</p></div>';
+        return;
     }
-    if(roqs) {
-        jsonpUrl = jsonpUrl+'&'+roqs;
-    }
-    
-    // Create unique callback name
-    const callbackName = 'jsonp_comments_' + (++callbackCounter);
-    jsonpUrl += '&jsonp=' + callbackName;
-    
-    // Create global callback function
-    window[callbackName] = function(jsonResponse) {
-        try {
-            thisthread = jsonResponse[0]['data']['children'][0]['data'];
-            fill += postbuilder(thisthread);
-            document.getElementById('pagetitletext').innerHTML = thisthread['subreddit'];
-            document.title = thisthread['title'];
-            sr = thisthread['subreddit'];
-            comments = jsonResponse[1]['data']['children'];
-            loadcomments(comments);
-            runhsl();
-            
-            // Clean up
-            delete window[callbackName];
-            document.head.removeChild(script);
-        } catch (error) {
-            console.error('Error loading comments:', error);
-            delete window[callbackName];
-            if (script.parentNode) {
-                document.head.removeChild(script);
-            }
+
+    var base = 'comments.html?url=' + encodeURIComponent(raw);
+    document.getElementById('rightbar').innerHTML =
+        '<a href="' + base + '&sort=best">Best</a>' +
+        '<a href="' + base + '&sort=top">Top</a>' +
+        '<a href="' + base + '&sort=new">New</a>' +
+        '<a href="' + base + '&sort=controversial">Controversial</a>' +
+        '<a href="' + base + '&sort=old">Old</a>' +
+        '<a href="' + base + '&sort=qa">QnA</a>' +
+        '<a onclick="saveit(this)" id="savebutton" style="border-top: 5px solid var(--greyc);">Save</a>' +
+        '<a onclick="shareit();" id="sharebutton">Share</a>';
+
+    if (!isLoggedIn()) { renderConnectPrompt(); return; }
+    document.getElementById('body').innerHTML = '<div class="notice"><p>Loading&hellip;</p></div>';
+
+    api.comments(permalink, { sort: getget('sort') }).then(function (res) {
+        // The comments endpoint answers with [postListing, commentListing].
+        thisthread = res[0]['data']['children'][0]['data'];
+        document.getElementById('body').innerHTML = postbuilder(thisthread);
+        document.getElementById('pagetitletext').innerHTML = thisthread['subreddit'];
+        document.title = thisthread['title'];
+        var savebtn = document.getElementById('savebutton');
+        if (savebtn && thisthread['saved']) {
+            savebtn.setAttribute('data-saved', '1');
+            savebtn.innerHTML = 'Saved';
         }
-    };
-    
-    // Create script tag for JSONP
-    const script = document.createElement('script');
-    script.src = jsonpUrl;
-    script.onerror = function() {
-        delete window[callbackName];
-        document.head.removeChild(script);
-        console.error('Comments request failed');
-    };
-    
-    document.head.appendChild(script);
+        fill = '';
+        loadcomments(res[1]['data']['children']);
+        runhsl();
+    }).catch(renderError);
 }
 
 // Renders a reply tree. Replaces three near-identical functions (one per
@@ -135,62 +109,40 @@ for (let i = 0; i < commentsdivs.length; i++) {
 }
 }
 
-//universal post functions
+// Expand a truncated comment tree. Reddit caps how many ids one call may
+// expand, so this walks `morejson` in batches.
+var MORECHILDREN_BATCH = 100;
 
-var pagenum = 0;
-
-// Modified loadmore function to use JSONP
 function loadmore(){
-    //console.log(morejson);
-    urljson = '';
+    var btn = document.getElementById('loadmore1');
+    if (btn) { btn.disabled = true; btn.innerHTML = 'Loading...'; }
 
-    for (var i = pagenum*60; i < morejson.length; i++){
-        urljson += morejson[i]+',';
-        if(i > 60*(pagenum+1)) {
-            pagenum = pagenum + 1;
-            break;
-        }
+    var batch = morejson.slice(pagenum * MORECHILDREN_BATCH,
+                               (pagenum + 1) * MORECHILDREN_BATCH);
+    if (!batch.length) {
+        document.getElementById('paginate').innerHTML = '';
+        return;
     }
-    console.log(urljson);
-    
-    urljson = urljson.replace(/,\s*$/, "");
-    
-    // Create unique callback name
-    const callbackName = 'jsonp_loadmore_' + (++callbackCounter);
-    
-    let jsonpUrl = 'https://www.reddit.com/r/'+thisthread['subreddit']+'/api/morechildren.json?api_type=json&link_id='+thisthread['name']+'&limit=500&r='+thisthread['subreddit']+'&children='+urljson+'&jsonp=' + callbackName;
+    pagenum += 1;
 
-    // Create global callback function
-    window[callbackName] = function(jsonResponse) {
-        try {
-            fill = '';
-            comments = jsonResponse['json']['data']['things'];
-            loadcomments(comments);
-            
-            // Clean up
-            delete window[callbackName];
-            document.head.removeChild(script);
-        } catch (error) {
-            console.error('Error loading more comments:', error);
-            delete window[callbackName];
-            if (script.parentNode) {
-                document.head.removeChild(script);
-            }
+    api.moreChildren(thisthread['name'], batch).then(function (res) {
+        fill = '';
+        var things = (res && res.json && res.json.data && res.json.data.things) || [];
+        loadcomments(things);
+
+        // Only offer the button again if ids remain.
+        if (pagenum * MORECHILDREN_BATCH < morejson.length) {
+            document.getElementById('paginate').innerHTML =
+                '<button onclick="loadmore()" id="loadmore1">Load More</button>';
+        } else {
+            document.getElementById('paginate').innerHTML = '';
         }
-    };
-    
-    // Create script tag for JSONP
-    const script = document.createElement('script');
-    script.src = jsonpUrl;
-    script.onerror = function() {
-        delete window[callbackName];
-        document.head.removeChild(script);
-        console.error('Load more comments request failed');
-    };
-    
-    document.head.appendChild(script);
+    }).catch(function (err) {
+        document.getElementById('paginate').innerHTML =
+            '<div class="notice"><p>Could not load more comments.' +
+            (err && err.message ? ' <small>' + err.message + '</small>' : '') + '</p></div>';
+    });
 }
-
 
 function collapse(){
 thisp = document.getElementById(this.id);

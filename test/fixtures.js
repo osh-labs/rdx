@@ -6,6 +6,7 @@
 function basePost(over = {}) {
     return {
         id: 'abc123',
+        name: 't3_abc123',
         subreddit: 'programming',
         subreddit_name_prefixed: 'r/programming',
         author: 'someone',
@@ -96,9 +97,8 @@ module.exports = {
         },
     }),
 
-    // The regression case: postbuilder recurses into crosspost_parent_list.
-    // Before the fix, `returnfpost` was an implicit global, so the recursive
-    // call wiped the parent's accumulated markup.
+    // crosspost_parent_list is left null rather than omitted, which is what
+    // exposed the guard that dereferenced null. See render.test.js.
     crosspostPost: basePost({
         id: 'xp001',
         title: 'Outer crosspost title',
@@ -129,6 +129,8 @@ module.exports = {
 
     comment: {
         id: 'c0001',
+        name: 't1_c0001',
+        likes: null,
         author: 'commenter',
         body_html: '&lt;div class="md"&gt;&lt;p&gt;A reply&lt;/p&gt;&lt;/div&gt;',
         score: 5,

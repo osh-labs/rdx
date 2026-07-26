@@ -6,9 +6,6 @@
 // functions against fixtures. Because functions.js runs in strict mode, any
 // undeclared variable on these paths throws rather than leaking a global.
 
-const fs = require('fs');
-const path = require('path');
-const vm = require('vm');
 const harness = require('./harness');
 const fx = require('./fixtures');
 
@@ -36,10 +33,7 @@ function contains(haystack, needle, label) {
 }
 
 harness.install();
-
-// Load functions.js into the global context the stub set up.
-const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'functions.js'), 'utf8');
-vm.runInThisContext(src, { filename: 'functions.js' });
+harness.loadApp();   // auth.js, api.js, functions.js -- same order as the pages
 
 // --- posts ---------------------------------------------------------------
 
@@ -48,7 +42,7 @@ check('text post renders title, subreddit and author', () => {
     contains(html, 'A post title');
     contains(html, 'r/programming');
     contains(html, 'someone');
-    contains(html, '42 votes');
+    contains(html, '>42</span> votes');
 });
 
 check('self text is decoded and reddit links are rewritten', () => {
@@ -146,7 +140,7 @@ check('crosspost does not corrupt a subsequent render', () => {
 check('comment renders author, score and decoded body', () => {
     const html = cbuilder(fx.comment);
     contains(html, 'commenter');
-    contains(html, '5 votes');
+    contains(html, '>5</span> votes');
     contains(html, 'A reply');
 });
 

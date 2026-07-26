@@ -917,3 +917,45 @@ span.axeit {
     font-weight: bold;
     font-family: sans-serif;
 }
+/* --- self-host additions ------------------------------------------------ */
+
+.notice {
+    padding: 20px 15px;
+    margin: 10px;
+    background: var(--greyc);
+    border-radius: 10px;
+    text-align: center;
+    font-size: 15px;
+    line-height: 1.6;
+}
+.notice h2 { font-size: 18px; margin: 0 0 10px; }
+.notice p { margin: 8px 0; }
+.notice code {
+    background: var(--bodyc);
+    padding: 1px 5px;
+    border-radius: 3px;
+}
+
+a.bigbtn {
+    display: inline-block;
+    background: var(--linkc);
+    color: var(--bodyc);
+    padding: 10px 24px;
+    border-radius: 10px;
+    text-decoration: none;
+    margin-top: 6px;
+}
+
+.votes { display: inline-block; margin-right: 4px; }
+.vote {
+    cursor: pointer;
+    padding: 0 3px;
+    color: var(--lightc);
+    user-select: none;
+    font-size: 13px;
+}
+.vote.up.voted { color: #ff4500; }
+.vote.down.voted { color: #7193ff; }
+.scorebox { font-variant-numeric: tabular-nums; }
+
+#unreadbadge { color: var(--linkc); font-weight: 600; }

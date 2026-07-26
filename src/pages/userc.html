@@ -2,101 +2,48 @@
 <!--#include head -->
 <!--#include chrome -->
 <script>
+// A user's comments are Listing children of kind t1, so they render through
+// cbuilder wrapped in the context of the post they were made on. This page
+// had its own inline XHR; it now shares the listing transport, which also
+// gives it infinite scroll and pagination it never had.
+function cpostbuilder(comment){
+    var out = '<div class="post" id="' + comment['id'] + '">' +
+        '<div class="post_author">' +
+        '<a href="subreddit.html?r=' + comment["subreddit"] + '">' + comment["subreddit_name_prefixed"] + '</a>' +
+        ' &bull; <a href="user.html?u=' + comment["link_author"] + '">' + comment["link_author"] + '</a></div>' +
+        '<div class="post_link"><a href="comments.html?url=https://www.reddit.com' + comment['permalink'] + '">' +
+        comment['link_title'] + '</a></div>';
+    out += cbuilder(comment);
+    out += '</div>';
+    return out;
+}
 
- 
-//Loading of posts
- 
 function doit(){
-username = getget('u')
-links = '<a href="user.html?u='+username+'&sort=new">New</a><a href="userc.html?u='+username+'&sort=hot">Hot</a><a href="userc.html?u='+username+'&sort=top">Top</a><a href="userc.html?u='+username+'&sort=top&t=month">Top (month)</a><a href="userc.html?u='+username+'&sort=top&t=all">Top (all)</a>';
-if(checklc('subs','u_'+username)){
-links += '<a onclick="unsubscribe(\'u_'+username+'\')" id="subbtn">Unfollow</a>>';
+    var username = getget('u');
+    if (!username) { window.location.href = 'index.html'; return; }
+
+    var base = 'userc.html?u=' + encodeURIComponent(username);
+    document.getElementById('rightbar').innerHTML =
+        '<a href="user.html?u=' + encodeURIComponent(username) + '">Posts</a>' +
+        '<a href="' + base + '&sort=new">New</a>' +
+        '<a href="' + base + '&sort=hot">Hot</a>' +
+        '<a href="' + base + '&sort=top">Top</a>' +
+        '<a href="' + base + '&sort=top&t=month">Top (month)</a>' +
+        '<a href="' + base + '&sort=top&t=all">Top (all)</a>' +
+        '<a onclick="shareit();" id="sharebutton">Share</a>';
+
+    document.getElementById('pagetitletext').innerHTML = username;
+    document.title = 'u/' + username + ' comments';
+
+    // Render comments rather than posts for this listing.
+    setListingRenderer(cpostbuilder);
+    loadListing(function (o) { return api.userComments(username, o); }, {
+        sort: getget('sort'),
+        t: getget('t'),
+        after: getget('after'),
+        before: getget('before'),
+    });
 }
-else {
-links += '<a onclick="subscribe(\'u_'+username+'\')" id="subbtn">follow</a><small style="padding:5px;opacity:0.6;">Only posts posted to user\'s own profile will be displayed in feed.</small>';
-}
-
-document.getElementById('rightbar').innerHTML = links;
-var fill = '';
-/*
-url = getget('url');
-url = url.replace(/amp.reddit.com/g, 'www.reddit.com');
-url = url.replace(/m.reddit.com/g, 'www.reddit.com');
-url = url.replace(/i.reddit.com/g, 'www.reddit.com');
-*/
-
-substoload = getget('u');
-document.getElementById('pagetitletext').innerHTML = getget('u');
-
-
-url='https://old.reddit.com/user/'+substoload+'/comments';
-
-
-console.log(url);
-url = url+'.json?limit=20';
-if(getget('sort') != null){
-console.log(getget('sort'));
-url = url+'&sort='+getget('sort');
-}
-if(getget('t') != null){
-console.log(getget('t'));
-url = url+'&t='+getget('t');
-}
-
-if(getget('after') != null){
-url = url+'&after='+getget('after');
-}
-if(getget('before') != null){
-url = url+'&before='+getget('before');
-}
-
-var req = new XMLHttpRequest();
-req.responseType = 'json';
-req.open('GET', url, true);
-req.onload  = function() {
-var jsonResponse = req.response;
- 
-
-var titlesx = url.replace("https://www.reddit.com/r/", "");
-titlesx = titlesx.replace("/.json", "");
-document.title = titlesx;
-posts = jsonResponse['data']['children'];
-
-
-for(var item in posts) {
-console.log("xx" + item);
-pid =  posts[item]['data'];
-fill += cpostbuilder(pid);
-}
-fill += '<div class="navigate">';
-var curpage = window.location.href.replace(/\&after.*/,'');
-if(jsonResponse['data']['after'] != null) {
-fill += '<a class="next" href="'+curpage+'&after='+jsonResponse['data']['after']+'">Next page</a>'
-}
-fill += '</div>';
-document.getElementById('body').innerHTML = fill;
-  
-};
-req.send(null);
-}
-
-function cpostbuilder(id){ 
-
-returncfpost = '';
-post = id;
-timeagoed = timeago(post['created_utc']*1000);
-returncfpost +=  '<div class="post" id="'+post['id']+'"><div class="post_author"><a href="subreddit.html?r='+post["subreddit"]+'">'+post["subreddit_name_prefixed"]+'</a> &bull;  <a href="user.html?u='+post["link_author"]+'">'+post["link_author"]+'</a></div><div class="post_link"><a href="comments.html?url=https://www.reddit.com'+ post['permalink']+'">'+post['link_title']+'</a></div>';
-
-
-
-
-cpostret = returncfpost;
-cpostret +=  cbuilder(id);
-cpostret += '</div>';
- return cpostret;
-
-}
-
 
 doit();
 </script>

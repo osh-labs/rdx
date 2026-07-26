@@ -2,58 +2,37 @@
 <!--#include head -->
 <!--#include chrome -->
 <script>
-
- 
- 
-//Loading of posts
- 
 function doit(){
-links = '<a href="subreddit.html?r='+getget('r')+'&sort=new">New</a><a href="subreddit.html?r='+getget('r')+'&sort=best">Best</a><a href="subreddit.html?r='+getget('r')+'&sort=rising">Rising</a><a href="subreddit.html?r='+getget('r')+'&sort=top">Top</a><a href="subreddit.html?r='+getget('r')+'&sort=top&t=week">Top (week)</a><a href="subreddit.html?r='+getget('r')+'&sort=top&t=month">Top (month)</a><a href="subreddit.html?r='+getget('r')+'&sort=top&t=year">Top (year)</a><a href="subreddit.html?r='+getget('r')+'&sort=top&t=all">Top (all)</a><a onclick="shareit();" id="sharebutton">Share</a>';
-if(checklc('subs',getget('r'))){
-links += '<a onclick="unsubscribe(\''+getget('r')+'\')" id="subbtn">Unsubscribe</a>';
+    var sub = getget('r');
+    if (!sub) { window.location.href = 'index.html'; return; }
+
+    var base = 'subreddit.html?r=' + encodeURIComponent(sub);
+    // "Best" is not a valid subreddit sort -- it only exists on the front
+    // page. Upstream offered it here and produced /r/x/best.
+    var links =
+        '<a href="' + base + '&sort=hot">Hot</a>' +
+        '<a href="' + base + '&sort=new">New</a>' +
+        '<a href="' + base + '&sort=rising">Rising</a>' +
+        '<a href="' + base + '&sort=top">Top</a>' +
+        '<a href="' + base + '&sort=top&t=week">Top (week)</a>' +
+        '<a href="' + base + '&sort=top&t=month">Top (month)</a>' +
+        '<a href="' + base + '&sort=top&t=year">Top (year)</a>' +
+        '<a href="' + base + '&sort=top&t=all">Top (all)</a>' +
+        '<a onclick="shareit();" id="sharebutton">Share</a>' +
+        '<a id="subbtn">&hellip;</a>';
+    document.getElementById('rightbar').innerHTML = links;
+    refreshSubButton(sub);
+
+    document.getElementById('pagetitletext').innerHTML = sub;
+    document.title = 'r/' + sub;
+
+    loadListing(function (o) { return api.subreddit(sub, o); }, {
+        sort: getget('sort'),
+        t: getget('t'),
+        after: getget('after'),
+        before: getget('before'),
+    });
 }
-else {
-links += '<a onclick="subscribe(\''+getget('r')+'\')" id="subbtn">Subscribe</a>';
-}
-
-document.getElementById('rightbar').innerHTML = links;
-var fill = '';
-/*
-url = getget('url');
-url = url.replace(/amp.reddit.com/g, 'www.reddit.com');
-url = url.replace(/m.reddit.com/g, 'www.reddit.com');
-url = url.replace(/i.reddit.com/g, 'www.reddit.com');
-*/
-
-substoload = getget('r');
-document.getElementById('pagetitletext').innerHTML = getget('r');
-
-
-url='https://www.reddit.com/r/'+substoload+'/';
-if(getget('sort') != null){
-url = url+''+getget('sort')+'';
-}
-
-
-console.log(url);
-limit = localStorage.getItem('ppg') || 20;
-url = url+'.json?limit='+limit;
-if(getget('t') != null){
-console.log(getget('t'));
-url = url+'&t='+getget('t');
-}
-
-if(getget('after') != null){
-url = url+'&after='+getget('after');
-}
-if(getget('before') != null){
-url = url+'&before='+getget('before');
-}
-
-makereq(url);
-
-}
-
 
 doit();
 </script>

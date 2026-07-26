@@ -2,56 +2,25 @@
 <!--#include head -->
 <!--#include chrome -->
 <script>
-
- 
-//Loading of posts
 function doit(){
-links = '<a href="/?x=y&sort=new">New</a><a href="/?x=y&sort=best">Best</a><a href="/?x=y&sort=rising">Rising</a><a href="/?x=y&sort=top">Top</a><a onclick="shareit();" id="sharebutton">Share</a>';
+    document.getElementById('rightbar').innerHTML =
+        '<a href="?sort=best">Best</a><a href="?sort=hot">Hot</a><a href="?sort=new">New</a>' +
+        '<a href="?sort=rising">Rising</a><a href="?sort=top">Top</a>' +
+        '<a href="?sort=top&t=week">Top (week)</a><a href="?sort=top&t=month">Top (month)</a>' +
+        '<a onclick="shareit();" id="sharebutton">Share</a>';
+    document.getElementById('pagetitletext').innerHTML = 'rdx';
+    document.title = 'rdx';
 
-
-document.getElementById('rightbar').innerHTML = links;
-var fill = '';
-/*
-url = getget('url');
-url = url.replace(/amp.reddit.com/g, 'www.reddit.com');
-url = url.replace(/m.reddit.com/g, 'www.reddit.com');
-url = url.replace(/i.reddit.com/g, 'www.reddit.com');
-*/
-
-if(JSON.parse(localStorage.getItem("subs")) == null || JSON.parse(localStorage.getItem("subs")).length == 0){
-substoload = "all";
+    // Authenticated, this IS the account's front page. Upstream concatenated
+    // r/sub1+sub2+sub3 from localStorage, which breaks once you have enough
+    // subscriptions to exceed URL length limits.
+    loadListing(function (o) { return api.frontPage(o); }, {
+        sort: getget('sort') || 'best',
+        t: getget('t'),
+        after: getget('after'),
+        before: getget('before'),
+    });
 }
-else {
-subsarray= JSON.parse(localStorage.getItem("subs"));
-substoload = subsarray.join("+");
-}
-document.getElementById('pagetitletext').innerHTML = 'rdx';
-
-
-url='https://old.reddit.com/r/'+substoload+'/';
-if(getget('sort') != null){
-url = url+''+getget('sort')+'';
-}
-
-
-console.log(url);
-limit = localStorage.getItem('ppg') || 20;
-url = url+'.json?limit='+limit;
-if(getget('t') != null){
-console.log(getget('t'));
-url = url+'&t='+getget('t');
-}
-
-if(getget('after') != null){
-url = url+'&after='+getget('after');
-}
-if(getget('before') != null){
-url = url+'&before='+getget('before');
-}
-
-makereq(url);
-}
-
 
 doit();
 </script>

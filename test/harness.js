@@ -98,9 +98,28 @@ function install() {
             return { body: { textContent: text } };
         }
     });
+    def('sessionStorage', {
+        _m: new Map(),
+        getItem(k) { return this._m.has(k) ? this._m.get(k) : null; },
+        setItem(k, v) { this._m.set(k, String(v)); },
+        removeItem(k) { this._m.delete(k); },
+    });
+    def('btoa', (s) => Buffer.from(String(s), 'binary').toString('base64'));
+    def('atob', (s) => Buffer.from(String(s), 'base64').toString('binary'));
     def('fetch', () => Promise.reject(new Error('network disabled in tests')));
     def('alert', () => {});
     def('confirm', () => true);
+}
+
+// Load the page script chain in the same order the pages do.
+function loadApp() {
+    const fs = require('fs');
+    const path = require('path');
+    const vm = require('vm');
+    for (const f of ['auth.js', 'api.js', 'functions.js']) {
+        const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', f), 'utf8');
+        vm.runInThisContext(src, { filename: f });
+    }
 }
 
 function reset() {
@@ -108,4 +127,4 @@ function reset() {
     elements.clear();
 }
 
-module.exports = { install, reset, store, elements, El };
+module.exports = { install, reset, loadApp, store, elements, El };

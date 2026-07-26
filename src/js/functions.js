@@ -1,26 +1,102 @@
 'use strict';
 // Utility functions [UNIVERSAL]
 
-var bmr = '';
-var nexturl = '';
-var nextseturl = '';
-var subslist = null;
+// --- subscriptions -------------------------------------------------------
+//
+// Backed by the Reddit account, not localStorage. Upstream kept subscriptions
+// in a local array populated by a bookmarklet the user pasted into
+// old.reddit.com to scrape their own sub list; subscribing here had no effect
+// on Reddit and vice versa. The list is now fetched from
+// /subreddits/mine/subscriber and cached, and the sub/unsub buttons write
+// through to Reddit.
 
-(function renderSubscribedList() {
-    var stored = JSON.parse(localStorage.getItem("subs"));
-    if (stored === null) { return; }
+var SUBS_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+
+function cachedSubs() {
+    try {
+        return JSON.parse(localStorage.getItem('subsCache')) || [];
+    } catch (e) {
+        return [];
+    }
+}
+
+function storeSubs(names) {
+    names = names.slice().sort(function (a, b) {
+        return a.toLowerCase().localeCompare(b.toLowerCase());
+    });
+    localStorage.setItem('subsCache', JSON.stringify(names));
+    localStorage.setItem('subsCacheAt', String(Date.now()));
+    renderSubscribedList();
+    return names;
+}
+
+function subsCacheStale() {
+    var at = parseInt(localStorage.getItem('subsCacheAt'), 10);
+    return !at || (Date.now() - at) > SUBS_CACHE_TTL_MS;
+}
+
+function renderSubscribedList() {
     // Not every page has the sidebar (settings, themes, login).
     var target = document.getElementById('subscribed');
     if (!target) { return; }
-    var subslisted = '';
-    stored.sort(function(a, b) {
-        return a.toLowerCase().localeCompare(b.toLowerCase());
-    });
-    for (var i = 0; i < stored.length; i++) {
-        subslisted += '<a href="subreddit.html?r='+stored[i]+'" class="homelinks">'+stored[i]+'</a>';
+    var names = cachedSubs();
+    if (!names.length) {
+        target.innerHTML = isLoggedIn()
+            ? '<small>No subscriptions found.</small>'
+            : '<small>Connect your account to see your subreddits.</small>';
+        return;
     }
-    target.innerHTML = subslisted;
-})();
+    var out = '';
+    for (var i = 0; i < names.length; i++) {
+        out += '<a href="subreddit.html?r=' + names[i] + '" class="homelinks">' + names[i] + '</a>';
+    }
+    target.innerHTML = out;
+}
+
+function refreshSubs(force) {
+    if (!isLoggedIn()) { return Promise.resolve([]); }
+    if (!force && !subsCacheStale()) { return Promise.resolve(cachedSubs()); }
+    return api.mySubreddits().then(storeSubs).catch(function () {
+        return cachedSubs();   // keep showing the stale list rather than blanking it
+    });
+}
+
+function isSubscribed(name) {
+    return cachedSubs().some(function (n) {
+        return n.toLowerCase() === String(name).toLowerCase();
+    });
+}
+
+function refreshSubButton(name) {
+    var btn = document.getElementById('subbtn');
+    if (!btn) { return; }
+    if (!isLoggedIn()) { btn.style.display = 'none'; return; }
+    var subscribed = isSubscribed(name);
+    btn.innerHTML = subscribed ? 'Unsubscribe' : 'Subscribe';
+    btn.setAttribute('onclick', (subscribed ? 'unsubscribe(' : 'subscribe(') +
+        "'" + name + "')");
+}
+
+function setSubscription(name, want) {
+    var btn = document.getElementById('subbtn');
+    if (btn) { btn.innerHTML = want ? 'Subscribing...' : 'Unsubscribing...'; }
+    return api.subscribe(name, want).then(function () {
+        var names = cachedSubs().filter(function (n) {
+            return n.toLowerCase() !== String(name).toLowerCase();
+        });
+        if (want) { names.push(name); }
+        storeSubs(names);
+        refreshSubButton(name);
+    }).catch(function (e) {
+        refreshSubButton(name);
+        alert('Could not update subscription: ' + (e && e.message ? e.message : e));
+    });
+}
+
+function subscribe(name) { return setSubscription(name, true); }
+function unsubscribe(name) { return setSubscription(name, false); }
+
+renderSubscribedList();
 
 
 function toggletheme(){
@@ -83,196 +159,209 @@ document.getElementById("subssearchi").focus();
  // return e.childNodes.length === 0 ? "" : e.childNodes[0].nodeValue;
 //}
 
-var callbackCounter = 0;
+// --- listing transport ---------------------------------------------------
+//
+// Replaces the JSONP implementation. JSONP is unusable now for two separate
+// reasons: the .json endpoints it targeted return 403, and a <script src=...>
+// tag cannot carry an Authorization header, so it could never reach the
+// authenticated API even if the old URLs still worked.
+//
+// Pages hand in a fetcher closure rather than a URL string, so pagination can
+// re-invoke the same query with a new `after` cursor without re-parsing
+// anything out of window.location.
 
-// Modified makereq function to use JSONP
-async function makereq(url) {
-  return new Promise((resolve, reject) => {
-    // Create unique callback name
-    const callbackName = 'jsonp_callback_' + (++callbackCounter);
-    
-    // Add .json and callback parameter to URL
-    let jsonpUrl = url;
-    if (!jsonpUrl.includes('.json')) {
-      jsonpUrl = url.replace(/\/$/, '') + '.json';
+var listingFetcher = null;   // function(opts) -> Promise
+var listingOpts = null;      // the opts the current page was loaded with
+var nextAfter = null;        // pagination cursor, null when exhausted
+var loadingMore = false;
+
+// Set by comments.html to the post currently being viewed. Declared here
+// because saveit() reads it, and under strict mode reading an undeclared
+// global throws rather than yielding undefined.
+var thisthread = null;
+
+function bodyEl() {
+    return document.getElementById('body');
+}
+
+// Shown instead of content when there is no connected account. Replaces the
+// hardcoded shutdown notice upstream left in two places.
+function renderConnectPrompt() {
+    bodyEl().innerHTML =
+        '<div class="notice">' +
+        '<h2>Connect your Reddit account</h2>' +
+        '<p>Reddit disabled unauthenticated access in May 2026, so this instance ' +
+        'reads Reddit through your own account.</p>' +
+        '<p><a class="bigbtn" href="login.html">Connect account</a></p>' +
+        '</div>';
+}
+
+function renderError(err) {
+    if (err && err.name === 'NotAuthenticatedError') {
+        renderConnectPrompt();
+        return;
     }
-    jsonpUrl += (jsonpUrl.includes('?') ? '&' : '?') + 'jsonp=' + callbackName;
-    
-    // Create global callback function
-    window[callbackName] = function(jsonResponse) {
-      try {
-        let fill = '';
-        let titlesx = url.replace("https://www.reddit.com/r/", "");
-        titlesx = titlesx.replace("/.json", "");
-        
-        const titlesxz = url.match(/\/(r|u|user)\/([^\/]+)/);
-        if (titlesxz) {
-          if(window.location.href == "https://rdx.overdevs.com/") {
-            // Don't change title for home page
-          } else {
-            document.title = titlesxz[2] +" • "+titlesxz[1]+"/"+titlesxz[2] ;
-          }
-          const metadesc = "Browse "+titlesxz[1]+"/"+titlesxz[2] +" images, videos, GIFs and text posts on rdx for reddit a fast, lightweight mobile Web Viewer for Reddit by overdevs.";
-          let metaDescription = document.querySelector('meta[name="description"]');
-          if (metaDescription) {
-            metaDescription.setAttribute("content", metadesc);
-          }
-        }
+    var msg;
+    if (err && err.name === 'RateLimitError') {
+        msg = 'Reddit is rate limiting this client. ' +
+            (err.resetSeconds ? 'Try again in ' + err.resetSeconds + ' seconds.' : 'Try again shortly.');
+    } else if (err && err.status === 403) {
+        msg = 'Reddit refused this request (403). If this just started, reconnect ' +
+            'your account &mdash; the app may be missing the <code>read</code> scope.';
+    } else if (err && err.status === 404) {
+        msg = 'Not found. That subreddit or user may not exist, or may be private.';
+    } else if (err && err.status === 429) {
+        msg = 'Rate limited. Try again shortly.';
+    } else {
+        msg = 'Could not load content.' + (err && err.message ? '<br><small>' + err.message + '</small>' : '');
+    }
+    bodyEl().innerHTML = '<div class="notice"><p>' + msg + '</p>' +
+        '<p><a class="bigbtn" href="' + window.location.href + '">Retry</a></p></div>';
+}
 
-        let posts = jsonResponse['data']['children'];
-        for (let item of posts) {
-          let pid = item['data'];
-          fill += postbuilder(pid);
-        }
+// --- voting --------------------------------------------------------------
+//
+// The `vote` scope was requested by upstream from the start but no vote UI
+// was ever built. `likes` is true/false/null for up/down/none.
 
-        fill += '<div class="navigate">';
-        let curpage = window.location.href.replace(/\&after.*/, '');
-        if (jsonResponse['data']['after'] != null) {
-          if (curpage.indexOf("?") === -1) {
-            curpage = curpage + '?a=b';
-          }
-          fill += '<a class="next" href="' + curpage + '&after=' + jsonResponse['data']['after'] + '">Next page</a><div id="sxpy"></div><div id="sentinel"> </div>';
-          let nextseturl = curpage + '&after=' + jsonResponse['data']['after'];
-          nexturl = url.split('&after')[0] + "&after=" + jsonResponse['data']['after'];
+function votebox(thing) {
+    if (!isLoggedIn() || !thing['name']) { return ''; }
+    var up = thing['likes'] === true ? ' voted' : '';
+    var down = thing['likes'] === false ? ' voted' : '';
+    return '<span class="votes" id="votes_' + thing['name'] + '">' +
+        '<span class="vote up' + up + '" onclick="castvote(\'' + thing['name'] + '\',1)" title="Upvote">&#9650;</span>' +
+        '<span class="vote down' + down + '" onclick="castvote(\'' + thing['name'] + '\',-1)" title="Downvote">&#9660;</span>' +
+        '</span> ';
+}
+
+function castvote(fullname, dir) {
+    var box = document.getElementById('votes_' + fullname);
+    var scoreEl = document.getElementById('score_' + fullname);
+    if (!box) { return; }
+    var upEl = box.querySelector('.vote.up');
+    var downEl = box.querySelector('.vote.down');
+
+    var wasUp = upEl.classList.contains('voted');
+    var wasDown = downEl.classList.contains('voted');
+    var previous = wasUp ? 1 : (wasDown ? -1 : 0);
+    // Clicking the direction you already chose clears the vote.
+    var next = (previous === dir) ? 0 : dir;
+
+    // Optimistic update, rolled back if Reddit rejects it.
+    var score = scoreEl ? parseInt(scoreEl.textContent, 10) : null;
+    function paint(v) {
+        upEl.classList.toggle('voted', v === 1);
+        downEl.classList.toggle('voted', v === -1);
+        if (scoreEl && score !== null) {
+            scoreEl.textContent = String(score - previous + v);
         }
-        fill += '</div>';
-        document.getElementById('body').innerHTML = fill;
+    }
+    paint(next);
+
+    api.vote(fullname, next).catch(function (e) {
+        paint(previous);
+        alert('Could not vote: ' + (e && e.message ? e.message : e));
+    });
+}
+
+// How to render one Listing child. Defaults to postbuilder; userc.html swaps
+// in a comment renderer.
+var listingItemRenderer = null;
+
+function setListingRenderer(fn) {
+    listingItemRenderer = fn;
+}
+
+function renderPosts(children) {
+    var render = listingItemRenderer || postbuilder;
+    var out = '';
+    for (var i = 0; i < children.length; i++) {
+        out += render(children[i]['data']);
+    }
+    return out;
+}
+
+// Build the "Next page" link from the current URL, replacing any existing
+// after= cursor.
+function nextPageHref(after) {
+    var url = new URL(window.location.href);
+    url.searchParams.set('after', after);
+    return url.pathname + url.search;
+}
+
+function renderListing(res) {
+    var data = (res && res.data) || {};
+    var children = data.children || [];
+
+    if (!children.length) {
+        bodyEl().innerHTML = '<div class="notice"><p>Nothing to show here.</p></div>';
+        return;
+    }
+
+    var fill = renderPosts(children);
+    fill += '<div class="navigate">';
+    nextAfter = data.after || null;
+    if (nextAfter) {
+        fill += '<a class="next" href="' + nextPageHref(nextAfter) + '">Next page</a>' +
+            '<div id="sxpy"></div><div id="sentinel"> </div>';
+    }
+    fill += '</div>';
+    bodyEl().innerHTML = fill;
+
+    runhsl();
+    if (curinfi == "true") {
+        observe();
+    }
+}
+
+// Entry point used by every listing page.
+function loadListing(fetcher, opts) {
+    listingFetcher = fetcher;
+    listingOpts = opts || {};
+    if (!isLoggedIn()) {
+        renderConnectPrompt();
+        return Promise.resolve();
+    }
+    bodyEl().innerHTML = '<div class="notice"><p>Loading&hellip;</p></div>';
+    return fetcher(listingOpts).then(renderListing).catch(renderError);
+}
+
+// Append the next page during infinite scroll.
+function scorllmore() {
+    if (!nextAfter || !listingFetcher || loadingMore) { return false; }
+    loadingMore = true;
+
+    var opts = {};
+    Object.keys(listingOpts).forEach(function (k) { opts[k] = listingOpts[k]; });
+    opts.after = nextAfter;
+
+    return listingFetcher(opts).then(function (res) {
+        var data = (res && res.data) || {};
+        var children = data.children || [];
+        var target = document.getElementById('sxpy');
+        if (target) { target.insertAdjacentHTML('beforeend', renderPosts(children)); }
+
+        // Keep the address bar in step so a refresh resumes where you are.
+        if (nextAfter) { history.pushState('', '', nextPageHref(nextAfter)); }
+
+        nextAfter = data.after || null;
+        var sentinel = document.getElementById('sentinel');
+        if (sentinel) { sentinel.innerHTML = nextAfter ? ' ' : ''; }
 
         runhsl();
-        if (curinfi == "true") {
-          observe();
+        loadingMore = false;
+    }).catch(function (err) {
+        loadingMore = false;
+        nextAfter = null;
+        var target = document.getElementById('sxpy');
+        if (target) {
+            target.insertAdjacentHTML('beforeend',
+                '<div class="notice"><p>Could not load more.' +
+                (err && err.message ? ' <small>' + err.message + '</small>' : '') + '</p></div>');
         }
-        
-        // Clean up
-        delete window[callbackName];
-        document.head.removeChild(script);
-        resolve();
-        
-      } catch (error) {
-        // Clean up on error
-        delete window[callbackName];
-        if (script.parentNode) {
-          document.head.removeChild(script);
-        }
-        reject(error);
-      }
-    };
-    
-    // Create script tag for JSONP
-    const script = document.createElement('script');
-    script.src = jsonpUrl;
-    script.onerror = function() {
-      delete window[callbackName];
-      document.head.removeChild(script);
-      document.getElementById('body').innerHTML = `
-<center style="padding:15px;">
-Last night <b><a href="https://www.reddit.com/r/modnews/comments/1tq9vxo/protecting_communities_from_scrapers_and_platform/">reddit disabled JSON feeds</a> that is affecting your usage of rdx website and app. I am trying to find ways to fix this. Maybe I can fix the apps using some workaround, maybe I can't but I will try. You can keep the apps or get the apps from app stores.<br><br>
-
-Thanks for your support for RDX for over 3 years. A small project that reached millions of people. You can <a href="https://buymeacoffee.com/overdevsapps">buy me a coffee here</a> if rdx has helped you and you want to support it in some way.<br>
-
-You can also try my other apps <a href="https://offchess.com">OffChess - Chess Puzzles</a> and <a href="https://at4klauncher.com">AT4K Android TV Launcher inspired by Apple TV</a>.<br><br>
-
--Avadhesh<br><br>
-
-Old info:<br>
-Can't load content!<br>
-
-<b>You can try the <a href="https://play.google.com/store/apps/details?id=com.overdevs.rdx">Android</a> and <a href="https://apps.apple.com/us/app/rdx-for-reddit/id6503479190">iPhone</a> apps to get around it. If the error persists there too then it's a Reddit problem and probably won't be fixed.</b>
-
-<small>
-There can be multiple reasons for this, your browser's aggressive privacy settings may be blocking the one call to reddit.com RDX makes. This happens usually when you use a VPN/Proxy and/or a privacy focused browser like Firefox.<br>
-Play around with privacy/tracking options or change your browser. If it still doesn't work click the feedback link and send me some info.
-</small>
-</center>`;
-      reject(new Error('JSONP request failed'));
-    };
-    
-    document.head.appendChild(script);
-  });
+    });
 }
 
-// Modified scorllmore function to use JSONP
-function scorllmore() {
-  const url = nexturl;
-  let fill = '';
-  
-  if(nexturl == '') {
-    return false;
-  }
-  
-  console.log(nexturl);
-  
-  // Create unique callback name
-  const callbackName = 'jsonp_scroll_' + (++callbackCounter);
-  
-  // Add .json and callback parameter to URL
-  let jsonpUrl = url;
-  if (!jsonpUrl.includes('.json')) {
-    jsonpUrl = url.replace(/\/$/, '') + '.json';
-  }
-  jsonpUrl += (jsonpUrl.includes('?') ? '&' : '?') + 'jsonp=' + callbackName;
-  
-  // Create global callback function
-  window[callbackName] = function(jsonResponse) {
-    try {
-      let posts = jsonResponse['data']['children'];
-      for(var item in posts) {
-        let pid = posts[item]['data'];
-        fill += postbuilder(pid);
-      }
-      
-      var curpage = window.location.href.replace(/\&after.*/,'');
-      if(jsonResponse['data']['after'] != null) {
-        if(curpage.indexOf("?") === -1) {
-          curpage = curpage+'?a=b';
-        } 
-        history.pushState("", "newtitle", nextseturl);
-        nextseturl = curpage+'&after='+jsonResponse['data']['after'];
-        nexturl = url.split('&after')[0];
-        nexturl = nexturl+"&after="+jsonResponse['data']['after'];
-      } else {
-        nexturl = '';
-      }
-      
-      document.getElementById('sxpy').insertAdjacentHTML('beforeend', fill);
-      document.getElementById('sentinel').innerHTML = ' ';
-      runhsl();
-      
-      // Clean up
-      delete window[callbackName];
-      document.head.removeChild(script);
-      
-    } catch (error) {
-      delete window[callbackName];
-      if (script.parentNode) {
-        document.head.removeChild(script);
-      }
-      document.getElementById('sxpy').innerHTML += '<center style="padding:15px;">Can\'t load content! Refresh the page or try again later.</center>';
-      nexturl = '';
-    }
-  };
-  
-  // Create script tag for JSONP
-  const script = document.createElement('script');
-  script.src = jsonpUrl;
-  script.onerror = function() {
-    delete window[callbackName];
-    document.head.removeChild(script);
-    document.getElementById('sxpy').innerHTML += '<center style="padding:15px;">Can\'t load content! Refresh the page or try again later.</center>';
-    nexturl = '';
-  };
-  
-  document.head.appendChild(script);
-}
-
-function axit(){
-        localStorage.setItem('appshown2', 'yes');
-document.getElementById('rdxapp').style.display = 'none';
-}
-function hideprompt() {
-  localStorage.setItem('promptshown', 'yes');
-document.getElementById('promptapp').style.display = 'none';
-}
 
 
 function observe() {
@@ -329,42 +418,55 @@ addarr = addarr.filter(function(item) {
 localStorage.setItem(to,JSON.stringify(addarr));
 }
 
-function searchsubs(q,event) {
-if(bmr){bmr.abort();}
-var xhr = new XMLHttpRequest();
- bmr = xhr;
-xhr.onreadystatechange = function()
-{
-    if (xhr.readyState === 4 && xhr.status == 200)
-    {
-        subslist = xhr.response;
-		let fillsubs = '';
-		for (var singlesub in subslist['subreddits'] )   
-{
-//console.log(subslist[singlesub]);
-fillsubs += '<a href="subreddit.html?r=' + subslist['subreddits'][singlesub]['name']+'">'+subslist['subreddits'][singlesub]['name']+'</a>';
-}
-document.getElementById('subslist').innerHTML = fillsubs;
-		}
-}
-xhr.responseType = 'json';
-xhr.open('GET', 'https://old.reddit.com//api/subreddit_autocomplete/.json?query='+q+'&include_profiles=false&include_over_18=true', true)
-xhr.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');
-xhr.send();
-if(q.length > 1){
-var key = event.keyCode || event.charCode;
-if( key == 13 ) {
-if(typeof subslist['subreddits'] !== undefined) {
-window.location = 'subreddit.html?r=' + subslist['subreddits'][0]['name']+'';}
-}}
+// Subreddit autocomplete. Was an XHR against
+// old.reddit.com/api/subreddit_autocomplete/.json (now 403); the authenticated
+// _v2 endpoint returns a standard Listing rather than {subreddits:[...]}.
+//
+// Two fixes beyond the transport: Enter used to be handled synchronously
+// straight after send(), so it navigated using the PREVIOUS query's results;
+// and out-of-order responses could overwrite newer ones. Both are sequenced
+// now.
+var autocompleteSeq = 0;
+var autocompleteResults = [];
+
+function renderSubsList(names) {
+    autocompleteResults = names;
+    var out = '';
+    for (var i = 0; i < names.length; i++) {
+        out += '<a href="subreddit.html?r=' + names[i] + '">' + names[i] + '</a>';
+    }
+    var el = document.getElementById('subslist');
+    if (el) { el.innerHTML = out; }
 }
 
-function unsubscribe(sub){removelc('subs',sub); const subbtn = document.getElementById('subbtn');  
- subbtn.setAttribute( "onclick",  'subscribe(\''+sub+'\')' ); subbtn.innerHTML = 'Subscribe';}
-function subscribe(sub){addlc('subs',sub);
-const subbtn = document.getElementById('subbtn');
-subbtn.setAttribute( "onclick",  'unsubscribe(\''+sub+'\')' );
- subbtn.innerHTML = 'Unsubscribe';}
+function searchsubs(q, event) {
+    var key = event && (event.keyCode || event.charCode);
+    if (key === 13) {
+        // Navigate to the top result we actually have, not one we hope to get.
+        if (autocompleteResults.length) {
+            window.location = 'subreddit.html?r=' + autocompleteResults[0];
+        } else if (q) {
+            window.location = 'subreddit.html?r=' + encodeURIComponent(q);
+        }
+        return;
+    }
+
+    q = (q || '').trim();
+    if (q.length < 2) { renderSubsList([]); return; }
+    if (!isLoggedIn()) { return; }
+
+    var seq = ++autocompleteSeq;
+    api.autocomplete(q).then(function (res) {
+        if (seq !== autocompleteSeq) { return; }   // a newer keystroke won
+        var children = (res && res.data && res.data.children) || [];
+        renderSubsList(children.map(function (c) { return c.data.display_name; }));
+    }).catch(function () {
+        if (seq === autocompleteSeq) { renderSubsList([]); }
+    });
+}
+
+// subscribe()/unsubscribe() now live with the rest of the subscription code
+// at the top of this file and write through to Reddit.
 
 function replaceRedditLinks(htmlContent) {
   var replacedText = htmlContent.replace(/href="\/u\/([^"]+)"/g, 'href="user.html?u=$1"').replace(/href="\/r\/([^"]+)"/g, 'href="subreddit.html?r=$1"')
@@ -446,7 +548,9 @@ returnfpost += pollbuilder(post);
 }
 
 
-returnfpost += '<div class="post_meta">'+post['score']+' votes &bull; <a href="comments.html?url=https://www.reddit.com'+ post['permalink']+'" >'+post['num_comments']+' comments</a>';
+returnfpost += '<div class="post_meta">' + votebox(post) +
+    '<span class="scorebox" id="score_' + post['name'] + '">' + post['score'] + '</span> votes &bull; ' +
+    '<a href="comments.html?url=https://www.reddit.com' + post['permalink'] + '">' + post['num_comments'] + ' comments</a>';
 if (localStorage.getItem('refreshToken') !== null && window.location.href.includes('comments.html')) {
   returnfpost += ' &bull; <span onclick="replyto(\'t3_' + post['id'] + '\')">Reply</span>';
 }
@@ -661,7 +765,7 @@ const ismod = comment['distinguished'] == 	" moderator" ? "ismod" : "";
 
 
 
-let cret = '<div class="comment ccp'+comment['depth']+'" id="'+comment['id']+'"><div class="comment_author"><span class="authorttext '+isop+''+ismod+'"><a class="authorlink" href="user.html?u='+ comment['author'] +'">'+ comment['author'] +'</a></span>  <span class="comment_meta">'+ comment['score'] +' votes &bull; '+timeagoed+' </span></div><div class="comment_text">'+ replaceRedditLinks(htmlDecode(comment['body_html'])) +'</div>';
+let cret = '<div class="comment ccp'+comment['depth']+'" id="'+comment['id']+'"><div class="comment_author"><span class="authorttext '+isop+''+ismod+'"><a class="authorlink" href="user.html?u='+ comment['author'] +'">'+ comment['author'] +'</a></span>  <span class="comment_meta">'+ votebox(comment) + '<span class="scorebox" id="score_'+ comment['name'] +'">'+ comment['score'] +'</span> votes &bull; '+timeagoed+' </span></div><div class="comment_text">'+ replaceRedditLinks(htmlDecode(comment['body_html'])) +'</div>';
 if(localStorage.getItem('refreshToken') != null){
 cret += '<div class="comment-reply"><span onclick="replyto(\'t1_'+comment['id']+'\')">Reply</span>';
 if(localStorage.getItem('userName') == comment['author']){
@@ -672,125 +776,180 @@ cret += '</div>';
 cret += '</div>';
 return cret;
 }
-function runhsl(){
-   if (localStorage.getItem('promptshown') !== 'yes') {
-         document.getElementById('header').insertAdjacentHTML("beforebegin", '<div class="prompt" id="promptapp"><a href="https://offchess.com">Try my Chess Puzzles app  - OffChess</a> <button onclick="hideprompt();">X</button></div>');
-       
-      }
-    if (localStorage.getItem('appshown2') !== 'yes') {
+// Post-render wiring: video players and gallery thumbnails.
+//
+// The upstream version also injected an OffChess promo bar above the header
+// and an App Store / Play Store install banner into every listing. Both are
+// gone, along with axit()/hideprompt() which dismissed them.
 
-    var userAgent = navigator.userAgent || navigator.vendor;
+// dash.js is 780 KB and only needed for v.redd.it DASH playback, so it is
+// loaded on demand rather than in every page's <head>.
+var dashLoading = null;
 
-    if (/android/i.test(userAgent)) {
-        // User is on an Android device
-        document.getElementById('body').insertAdjacentHTML("afterbegin",
-            '<div id="rdxapp">rdx Android app is here <a class="dlbtnapp" href="https://play.google.com/store/apps/details?id=com.overdevs.rdx">Install</a> <span class="axeit" onclick="axit();">X</span></div>');
-    } else if (/iPad|iPhone|iPod/.test(userAgent)) {
-        // User is on an iOS device
-        document.getElementById('body').insertAdjacentHTML("afterbegin",
-            '<div id="rdxapp">rdx iPhone app v1.2 is here <a class="dlbtnapp" href="https://apps.apple.com/us/app/rdx-for-reddit/id6503479190">Install</a> <span class="axeit" onclick="axit();">X</span></div>');
-    } else if (/Mac/.test(userAgent)) {
-        // User is on a macOS device
-        document.getElementById('body').insertAdjacentHTML("afterbegin",
-            '<div id="rdxapp">rdx iPhone app v1.2 is here <a class="dlbtnapp" href="https://apps.apple.com/us/app/rdx-for-reddit/id6503479190">Install</a> <span class="axeit" onclick="axit();">X</span></div>');
-    }
-
-     }
-
-
- const videos = document.querySelectorAll('.reddit_hls:not(.goner)');
-                
-
-        videos.forEach(video => {
-        	const videoContainer = video.parentElement;
-        	video.classList.add('goner');
-          //  if (video.canPlayType('application/vnd.apple.mpegurl')) {
-                // Browser natively supports HLS
-           //     video.src = video.src;
-       //     } else if (Hls.isSupported()) {
-                // Use hls.js for HLS playback
-       //         const hls = new Hls();
-        //        hls.loadSource(video.src);
-         //       hls.attachMedia(video);
-
-          //  } else {
-                // Provide a fallback for unsupported browsers
-            //    video.src = video.getAttribute('data-fallback');
-                
-           // }
-           const isIOS = /iPhone|iPad/i.test(navigator.userAgent);
-if (isIOS) {
- video.src = video.getAttribute('data-hls');
+function loadDashJs() {
+    if (typeof dashjs !== 'undefined') { return Promise.resolve(); }
+    if (dashLoading) { return dashLoading; }
+    dashLoading = new Promise(function (resolve, reject) {
+        var s = document.createElement('script');
+        s.src = 'dash.all.min.js';
+        s.onload = resolve;
+        s.onerror = function () { reject(new Error('could not load dash.all.min.js')); };
+        document.head.appendChild(s);
+    });
+    return dashLoading;
 }
-else {
-           const hls = dashjs.MediaPlayer().create();
-hls.initialize(video,video.src, false);
-         }
+
+function attachVideos() {
+    var videos = document.querySelectorAll('.reddit_hls:not(.goner)');
+    if (!videos.length) { return; }
+
+    var needsDash = [];
+    var isIOS = /iPhone|iPad/i.test(navigator.userAgent);
+
+    videos.forEach(function (video) {
+        video.classList.add('goner');
+        if (isIOS) {
+            // Safari plays HLS natively; no player library needed.
+            video.src = video.getAttribute('data-hls');
+        } else {
+            needsDash.push(video);
+        }
+    });
+
+    if (!needsDash.length) { return; }
+    loadDashJs().then(function () {
+        needsDash.forEach(function (video) {
+            var player = dashjs.MediaPlayer().create();
+            player.initialize(video, video.src, false);
         });
-        
-        const gtumbs = document.querySelectorAll('.gtumb');
-                gtumbs.forEach(gtum => {
-gtum.addEventListener("click",function() {
-const curod = this.getAttribute('data-id');
-document.getElementById("mi_"+curod).src= this.getAttribute('data-msrc');
-
-  document.querySelectorAll('[data-id="'+curod+'"]').forEach(el => el.classList.remove('actv'));
-  
-  this.classList.add('actv');
-document.getElementById("mi_"+curod).scrollIntoView(); 
-  });
-  });
-
-
+    }).catch(function () {
+        // Fall back to the progressive MP4 rather than leaving a dead player.
+        needsDash.forEach(function (video) {
+            var fallback = video.getAttribute('data-fallback');
+            if (fallback) { video.src = fallback; }
+        });
+    });
 }
-  
-  
+
+function attachGalleries() {
+    document.querySelectorAll('.gtumb').forEach(function (gtum) {
+        gtum.addEventListener('click', function () {
+            var id = this.getAttribute('data-id');
+            var main = document.getElementById('mi_' + id);
+            if (!main) { return; }
+            main.src = this.getAttribute('data-msrc');
+            document.querySelectorAll('[data-id="' + id + '"]').forEach(function (el) {
+                el.classList.remove('actv');
+            });
+            this.classList.add('actv');
+            main.scrollIntoView();
+        });
+    });
+}
+
+function runhsl(){
+    attachVideos();
+    attachGalleries();
+}
+
+
   function shareit(){
   	if(navigator.share){const t=window.location.href;const n=document.title;const e={title:n,url:t};navigator.share(e).then(()=>{console.log("Shared successfully")}).catch(e=>{console.error("Error sharing:",e)})}
   	else{const t=window.location.href,n=document.createElement("textarea");n.value=t,document.body.appendChild(n),n.select(),document.execCommand("copy"),document.body.removeChild(n),alert("Link copied to clipboard: "+t)}
   }
   
-function saveit(e) {
+// --- saved posts ---------------------------------------------------------
+//
+// Real Reddit saves. Upstream pushed {url, title, subreddit} into a
+// localStorage array, so saves were invisible to Reddit and to every other
+// client, and could not be read back on another device.
+//
+// Anything already in the old localStorage array is still shown, under a
+// separate heading, so nothing you saved before is lost.
 
-if(e.innerHTML == 'Saved') {
-window.location.href = 'saved.html';
-return false;
+function saveit(el) {
+    if (!thisthread || !thisthread.name) { return false; }
+    if (!isLoggedIn()) { window.location.href = 'login.html'; return false; }
+
+    var wasSaved = el.getAttribute('data-saved') === '1';
+    el.innerHTML = wasSaved ? 'Unsaving...' : 'Saving...';
+
+    api.save(thisthread.name, !wasSaved).then(function () {
+        el.setAttribute('data-saved', wasSaved ? '0' : '1');
+        el.innerHTML = wasSaved ? 'Save' : 'Saved';
+    }).catch(function (e) {
+        el.innerHTML = wasSaved ? 'Saved' : 'Save';
+        alert('Could not update saved posts: ' + (e && e.message ? e.message : e));
+    });
+    return false;
 }
-        const u = window.location.href;
-        const t = document.title;
-        const s = document.querySelector('.post_author a').innerText;
-        const savedLinks = JSON.parse(localStorage.getItem('savedlinks')) || [];
-        savedLinks.push({u, t,s});
-        localStorage.setItem('savedlinks', JSON.stringify(savedLinks));
-        e.innerHTML = 'Saved';
-    }
 
-    function displayit() {
-          const savedLinks = JSON.parse(localStorage.getItem('savedlinks')) || [];
-    const linksContainer = document.getElementById('links-container');
-    linksContainer.innerHTML = '';
-
-    for (let i = savedLinks.length - 1; i >= 0; i--) {
-        const link = savedLinks[i];
-
-        const linkElement = document.createElement('div');
-        linkElement.className = 'post';
-        linkElement.innerHTML = '<div class="post_author"><a href="subreddit.html?r='+link.s.replace('r/','')+'">'+link.s+'</a> <span onclick="removeit(' + i + ');" style="float:right;color: var(--lightc);">X</span> </div><div class="post_link"><a href="'+link.u+'">'+link.t+'</a></div>';
-        linksContainer.appendChild(linkElement);
-    }
-    }
-    function removeit(index) {
-    const savedLinks = JSON.parse(localStorage.getItem('savedlinks')) || [];
-    
-    // Ensure index is within bounds
-    if (index >= 0 && index < savedLinks.length) {
-        savedLinks.splice(index, 1); // Remove the element at the specified index
-        localStorage.setItem('savedlinks', JSON.stringify(savedLinks));
-        displayit(); // Update the display after removing the link
+function legacySavedLinks() {
+    try {
+        return JSON.parse(localStorage.getItem('savedlinks')) || [];
+    } catch (e) {
+        return [];
     }
 }
 
- 
+function renderLegacySaved(container) {
+    var links = legacySavedLinks();
+    if (!links.length) { return; }
+    var html = '<div class="notice"><p><b>Saved before this instance used your ' +
+        'Reddit account.</b> These are stored only in this browser.</p></div>';
+    for (var i = links.length - 1; i >= 0; i--) {
+        var link = links[i];
+        html += '<div class="post"><div class="post_author">' +
+            '<a href="subreddit.html?r=' + String(link.s || '').replace('r/', '') + '">' + (link.s || '') + '</a>' +
+            '<span onclick="removeit(' + i + ');" style="float:right;color:var(--lightc);cursor:pointer;">X</span>' +
+            '</div><div class="post_link"><a href="' + link.u + '">' + link.t + '</a></div></div>';
+    }
+    container.insertAdjacentHTML('beforeend', html);
+}
+
+function displayit() {
+    var container = document.getElementById('links-container');
+    if (!container) { return; }
+
+    if (!isLoggedIn()) {
+        // Render into the container, not via renderConnectPrompt() -- that
+        // rewrites #body and would detach the container underneath us.
+        container.innerHTML =
+            '<div class="notice"><h2>Connect your Reddit account</h2>' +
+            '<p>Your Reddit saves live on your account.</p>' +
+            '<p><a class="bigbtn" href="login.html">Connect account</a></p></div>';
+        renderLegacySaved(container);
+        return;
+    }
+
+    container.innerHTML = '<div class="notice"><p>Loading&hellip;</p></div>';
+    api.savedPosts({ limit: 50 }).then(function (res) {
+        var children = (res && res.data && res.data.children) || [];
+        var html = '';
+        for (var i = 0; i < children.length; i++) {
+            html += postbuilder(children[i]['data']);
+        }
+        container.innerHTML = html || '<div class="notice"><p>You have no saved posts.</p></div>';
+        renderLegacySaved(container);
+        runhsl();
+    }).catch(function (e) {
+        container.innerHTML = '<div class="notice"><p>Could not load saved posts.' +
+            (e && e.message ? '<br><small>' + e.message + '</small>' : '') + '</p></div>';
+        renderLegacySaved(container);
+    });
+}
+
+// Removes an entry from the pre-migration localStorage list only.
+function removeit(index) {
+    var links = legacySavedLinks();
+    if (index >= 0 && index < links.length) {
+        links.splice(index, 1);
+        localStorage.setItem('savedlinks', JSON.stringify(links));
+        displayit();
+    }
+}
+
+
 function replyto(cmtid){
 document.getElementById('popitup').style.display = 'block';
 document.getElementById('cmtid').value = cmtid;
@@ -824,260 +983,206 @@ function deleteto(cmtid){
     }
 }
 
-function inboxto(){
+// --- write actions -------------------------------------------------------
+//
+// apiAction() used to hand-roll a token-expiry check and a refresh request
+// with the client secret inline, then dispatch to four functions that each
+// built their own fetch(). All of that now lives in redditFetch/api, so this
+// is just dispatch plus DOM updates.
+
+function inboxto() {
     document.getElementById('actype').value = "i";
-        apiAction();
+    apiAction();
 }
 
 function apiAction() {
-    const accessToken = localStorage.getItem('accessToken');
-    const expiresIn = localStorage.getItem('expiresIn');
-    const refreshToken = localStorage.getItem('refreshToken');
-    const clientId = localStorage.getItem('clientId');
-    const clientSecret = localStorage.getItem('clientSecret');
-    const redirectUri = 'https://rdx.overdevs.com/login.html'; 
-    const actionType  = document.getElementById('actype').value;
- 
-  
-    if (accessToken && expiresIn) {
-        const currentTimestamp = Date.now();
-        const expiresAt = parseInt(expiresIn);
-        if (currentTimestamp < expiresAt) {
-        if(actionType == "c") {
-            submitComment(accessToken);
-           }
-           else if(actionType == "e") {
-           	editComment(accessToken);
-           }
-           else if(actionType == "d") {
-           	delComment(accessToken);
-           }
-              else if(actionType == "i") {
-           	getInbox(accessToken);
-           }
-           else {}
-        } else {
-            // Access token has expired, renew it using refreshToken
-            const tokenUrl = 'https://www.reddit.com/api/v1/access_token';
-            fetch(tokenUrl, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                    'Authorization': `Basic ${btoa(`${clientId}:${clientSecret}`)}`,
-                },
-                body: `grant_type=refresh_token&refresh_token=${refreshToken}`,
-            })
-            .then(response => response.json())
-            .then(tokenData => {
-                const newAccessToken = tokenData.access_token;
-                const newRefreshToken = tokenData.refresh_token;
-                const expiresIn = tokenData.expires_in; // Expires in seconds
-                const expirationTimestamp = currentTimestamp + (expiresIn * 1000);
-                localStorage.setItem('accessToken', newAccessToken);
-                localStorage.setItem('refreshToken', newRefreshToken);
-                localStorage.setItem('expiresIn', expirationTimestamp.toString());
-                  if(actionType == "c") {
-            submitComment(accessToken);
-           }
-           else if(actionType == "e") {
-           	editComment(accessToken);
-           }
-           else if(actionType == "d") {
-           	delComment(accessToken);
-           }
-            else if(actionType == "i") {
-           	getInbox(accessToken);
-           }
-           else {}
-            })
-            .catch(error => {
-            	    document.getElementById('cmntbtn').disabled = false;
-    document.getElementById('cmntbtn').innerHTML = 'Submit';
-                alert('Error refreshing token:', error);
-            });
-        }
-    } else {
+    if (!isLoggedIn()) {
         window.location.href = 'login.html';
+        return;
     }
-} 
+    switch (document.getElementById('actype').value) {
+        case 'c': submitComment(); break;
+        case 'e': editComment(); break;
+        case 'd': delComment(); break;
+        case 'i': getInbox(); break;
+        default: break;
+    }
+}
 
-function submitComment(accessToken) {
-  document.getElementById('cmntbtn').disabled = true;
-    document.getElementById('cmntbtn').innerHTML = 'Submitting...';
-   const thingId =  document.getElementById('cmtid').value;
-    const commentText = document.getElementById('commentText').value;
-    const commentUrl = 'https://oauth.reddit.com/api/comment';
-    fetch(commentUrl, {
-        method: 'POST',
-        headers: {
-            'Authorization': `bearer ${accessToken}`,
-            'Content-Type': 'application/x-www-form-urlencoded',         },
-        body: `api_type=json&text=${encodeURIComponent(commentText)}&thing_id=${thingId}`, 
-            })
-    .then(response => response.json())
-    .then(commentData => {
-        if (commentData.errors && commentData.errors.length > 0) {
-        	    document.getElementById('cmntbtn').disabled = false;
-    document.getElementById('cmntbtn').innerHTML = 'Submit';
-            alert('Error submitting comment:'+ commentData.errors);
-        } else {
-        	    document.getElementById('cmntbtn').disabled = false;
-    document.getElementById('cmntbtn').innerHTML = 'Submit';
-        document.getElementById('popitup').style.display = 'none';
-document.getElementById('commentText').value = '';
-    let ebId = thingId.replace(/^(t1_|t3_)/, '');
-    let ccclass= "ccp0";
-    if(document.getElementById(ebId).className != "post"){
-     let ccNumber = document.getElementById(ebId).className.match(/ccp\d+/)[0].replace("ccp", "");
-     ccNumber = Math.floor(ccNumber)+1;
-ccclass = "ccp" + ccNumber;
-}  
-            document.getElementById(ebId).insertAdjacentHTML('afterEnd','<div class="comment '+ccclass+'"><div class="comment_author"><span class="authorttext ">You</span>  <span class="comment_meta">1 votes • Just now </span></div><div class="comment_text">'+commentText+'</div></div>');
-        } 
-    })
-    .catch(error => {
-    	    document.getElementById('cmntbtn').disabled = false;
-    document.getElementById('cmntbtn').value = 'Submit';
-        alert('Error submitting comment:'+ error);
+function setSubmitBusy(busy) {
+    var btn = document.getElementById('cmntbtn');
+    if (!btn) { return; }
+    btn.disabled = busy;
+    btn.innerHTML = busy ? 'Submitting...' : 'Submit';
+}
+
+function closeReplyBox() {
+    document.getElementById('popitup').style.display = 'none';
+    document.getElementById('commentText').value = '';
+}
+
+// Reddit reports application-level failures inside a 200 response.
+function apiErrors(res) {
+    var errs = res && res.json && res.json.errors;
+    return (errs && errs.length) ? errs.map(function (e) { return e.join(': '); }).join('; ') : null;
+}
+
+function submitComment() {
+    var thingId = document.getElementById('cmtid').value;
+    var text = document.getElementById('commentText').value;
+    if (!text.trim()) { return; }
+    setSubmitBusy(true);
+
+    api.comment(thingId, text).then(function (res) {
+        var err = apiErrors(res);
+        if (err) { throw new Error(err); }
+        setSubmitBusy(false);
+        closeReplyBox();
+
+        var anchorId = thingId.replace(/^(t1_|t3_)/, '');
+        var anchor = document.getElementById(anchorId);
+        if (!anchor) { return; }
+        var cls = 'ccp0';
+        if (anchor.className !== 'post') {
+            var m = anchor.className.match(/ccp(\d+)/);
+            if (m) { cls = 'ccp' + (parseInt(m[1], 10) + 1); }
+        }
+        // Render the real comment Reddit created rather than a fake stub, so
+        // the id and score are correct if the user then edits or deletes it.
+        var created = res && res.json && res.json.data && res.json.data.things &&
+            res.json.data.things[0] && res.json.data.things[0].data;
+        if (created) {
+            anchor.insertAdjacentHTML('afterend', cbuilder(created));
+        }
+    }).catch(function (e) {
+        setSubmitBusy(false);
+        alert('Error submitting comment: ' + (e && e.message ? e.message : e));
     });
 }
 
-function editComment(accessToken) {
-  document.getElementById('cmntbtn').disabled = true;
-    document.getElementById('cmntbtn').innerHTML = 'Submitting...';
-   const thingId =  document.getElementById('cmtid').value;
-    const commentText = document.getElementById('commentText').value;
-    const commentUrl = 'https://oauth.reddit.com/api/editusertext';
-    fetch(commentUrl, {
-        method: 'POST',
-        headers: {
-            'Authorization': `bearer ${accessToken}`,
-            'Content-Type': 'application/x-www-form-urlencoded',         },
-        body: `api_type=json&text=${encodeURIComponent(commentText)}&thing_id=${thingId}`, 
-            })
-    .then(response => response.json())
-    .then(commentData => {
-        if (commentData.errors && commentData.errors.length > 0) {
-        	    document.getElementById('cmntbtn').disabled = false;
-    document.getElementById('cmntbtn').innerHTML = 'Submit';
-            alert('Error editing comment:'+ commentData.errors);
-        } else {
-        	    document.getElementById('cmntbtn').disabled = false;
-        	     document.getElementById('cmntbtn').value = 'Submit';
-        	        document.getElementById('popitup').style.display = 'none';
-document.getElementById('commentText').value = '';
-let ebId = thingId.replace(/^(t1_|t3_)/, '');
-        	    document.getElementById(ebId).querySelector('.comment_text').textContent = commentText;
-        } 
-    })
-    .catch(error => {
-    	    document.getElementById('cmntbtn').disabled = false;
-    document.getElementById('cmntbtn').innerHTML = 'Submit';
-        alert('Error editing comment:'+ error);
+function editComment() {
+    var thingId = document.getElementById('cmtid').value;
+    var text = document.getElementById('commentText').value;
+    setSubmitBusy(true);
+
+    api.editComment(thingId, text).then(function (res) {
+        var err = apiErrors(res);
+        if (err) { throw new Error(err); }
+        setSubmitBusy(false);
+        closeReplyBox();
+        var el = document.getElementById(thingId.replace(/^(t1_|t3_)/, ''));
+        if (el) {
+            var body = el.querySelector('.comment_text');
+            if (body) { body.textContent = text; }
+        }
+    }).catch(function (e) {
+        setSubmitBusy(false);
+        alert('Error editing comment: ' + (e && e.message ? e.message : e));
     });
 }
 
-function delComment(accessToken) {
-   const thingId =  document.getElementById('cmtid').value;
-   const commentUrl = 'https://oauth.reddit.com/api/del';
-    fetch(commentUrl, {
-        method: 'POST',
-        headers: {
-            'Authorization': `bearer ${accessToken}`,
-            'Content-Type': 'application/x-www-form-urlencoded',         },
-        body: `id=${thingId}`, 
-            })
-    .then(response => response.json())
-    .then(commentData => {
-        if (commentData.errors && commentData.errors.length > 0) {
-
-            alert('Error deleting comment:'+ commentData.errors);
-        } else {
-        	
-let ebId = thingId.replace(/^(t1_|t3_)/, '');
-        	    document.getElementById(ebId).style.display = 'none';
-        } 
-    })
-    .catch(error => {
-        alert('Error deleting comment:'+ error);
+function delComment() {
+    var thingId = document.getElementById('cmtid').value;
+    api.deleteComment(thingId).then(function () {
+        var el = document.getElementById(thingId.replace(/^(t1_|t3_)/, ''));
+        if (el) { el.style.display = 'none'; }
+    }).catch(function (e) {
+        alert('Error deleting comment: ' + (e && e.message ? e.message : e));
     });
 }
 
-function getInbox(accessToken) {
-const inboxUrl = 'https://oauth.reddit.com/message/inbox';
+function getInbox() {
+    var target = document.getElementById('inboxbody');
+    if (!target) { return; }
+    if (!isLoggedIn()) {
+        target.innerHTML = '<div class="notice"><p>Connect your Reddit account to read your inbox.</p>' +
+            '<p><a class="bigbtn" href="login.html">Connect account</a></p></div>';
+        return;
+    }
+    target.innerHTML = '<div class="notice"><p>Loading&hellip;</p></div>';
 
-fetch(inboxUrl, {
-    method: 'GET',
-    headers: {
-        'Authorization': `Bearer ${accessToken}`
-    },
-})
-.then(response => response.json())
-.then(inboxData => {
-    if (inboxData.error) {
-        console.error('Error fetching inbox messages:', inboxData.error);
+    api.inbox().then(function (res) {
+        var messages = (res && res.data && res.data.children) || [];
+        if (!messages.length) {
+            target.innerHTML = '<div class="notice"><p>Your inbox is empty.</p></div>';
+            return;
+        }
+        var html = '';
+        messages.forEach(function (item) {
+            // Each Listing child is {kind, data}. The old code destructured
+            // item.inboxMessages, which does not exist, so this threw on
+            // every message. The reply target is `name` (a fullname like
+            // t1_abc), not `tname`, and body_html arrives escaped.
+            var kind = item.kind;
+            var d = item.data || {};
+            if (kind !== 't1' && kind !== 't4') { return; }
+
+            var date = new Date(d.created_utc * 1000);
+            var pad = function (n) { return String(n).padStart(2, '0'); };
+            var when = date.getDate() + '/' + (date.getMonth() + 1) + '/' + date.getFullYear() +
+                ' - ' + date.getHours() + ':' + pad(date.getMinutes());
+            var body = d.body_html ? replaceRedditLinks(htmlDecode(d.body_html)) : '';
+
+            html += '<div class="inboxmsgwrap">';
+            html += '<div class="ibxmeta"><span class="ibxauthor"><a href="user.html?u=' + d.author + '">u/' + d.author + '</a>' +
+                ' &bull; <span class="ibxtime">' + when + '</span></span></div>';
+            html += '<div class="ibxsub">' + (d.subject || '') + '</div>';
+            if (kind === 't1' && d.context) {
+                html += '<div class="ibxlink"><a href="comments.html?url=https://www.reddit.com' + d.context + '">' +
+                    (d.link_title || 'View context') + '</a></div>';
+            }
+            html += '<div class="ibxmsg">' + body + '</div>';
+            html += '<div class="ibxactions"><button onclick="replyto(\'' + d.name + '\')">Reply</button></div>';
+            html += '</div>';
+        });
+        target.innerHTML = html;
+    }).catch(function (e) {
+        target.innerHTML = '<div class="notice"><p>Could not load your inbox.' +
+            (e && e.message ? '<br><small>' + e.message + '</small>' : '') + '</p></div>';
+    });
+}
+
+// Sidebar: search form plus account links. Runs on every page that includes
+// the full chrome.
+window.onload = function () {
+    var leftbar = document.getElementById('leftbar');
+    if (!leftbar) { return; }
+
+    var curq = getget('q') || '';
+    var html = '<form class="search" action="search.html">' +
+        '<input type="search" name="q" value="' + curq + '"/>' +
+        '<input type="submit" value="Search"/><br style="clear:both;">';
+
+    // Offer to scope the search to whatever this page is already showing.
+    var sub = getget('r');
+    var user = getget('u');
+    if (sub) {
+        html += '<input type="checkbox" id="chkr" name="r" value="' + sub + '" checked>' +
+            '<label for="chkr"> Only search r/' + sub + '</label>';
+    }
+    if (user) {
+        html += '<input type="checkbox" id="chku" name="u" value="' + user + '" checked>' +
+            '<label for="chku"> Only search u/' + user + '</label>';
+    }
+    html += '</form>';
+
+    if (isLoggedIn()) {
+        var me = currentUser() || 'Account';
+        // The stray "+" here produced links to u/+username.
+        html += '<a href="user.html?u=' + me + '" class="homelinks">' + me + '</a>';
+        html += '<a href="inbox.html" class="homelinks half">Inbox<span id="unreadbadge"></span></a>';
+        html += '<a href="login.html" class="homelinks half">Account</a>';
     } else {
-        const inboxMessages = inboxData.data.children;
-console.log(inboxMessages);
-      
-    let html = '';
-
-  inboxMessages.forEach((item) => {
-    // Each Listing child is {kind, data}. The old code destructured
-    // `item.inboxMessages`, which does not exist, so this threw on every
-    // message. The reply target is `name` (a fullname like t1_abc), not
-    // `tname`, and body_html arrives HTML-escaped so it needs decoding.
-    const kind = item.kind;
-    const { author, created_utc, subject, link_title, body_html, name, context } = item.data;
-    const date = new Date(created_utc * 1000);
-    const pad = (n) => String(n).padStart(2, '0');
-    const formattedDate = `${date.getDate()}/${date.getMonth() + 1}/${date.getFullYear()} - ${date.getHours()}:${pad(date.getMinutes())}`;
-    const bodyHtml = body_html ? replaceRedditLinks(htmlDecode(body_html)) : '';
-
-    if (kind === 't1' || kind === 't4') {
-      html += `<div class="inboxmsgwrap"><div class="ibxmeta"><span class="ibxauthor"><a href="user.html?u=${author}">u/${author}</a> &bull;  <span class="ibxtime">${formattedDate}</span></span></div>`;
-      html += `<div class="ibxsub">${subject || ''}</div>`;
-      if (kind === 't1' && context) {
-        html += `<div class="ibxlink"><a href="comments.html?url=https://www.reddit.com${context}">${link_title || 'View context'}</a></div>`;
-      }
-      html += `<div class="ibxmsg">${bodyHtml}</div>`;
-      html += `<div class="ibxactions"><button onclick="replyto('${name}')">Reply</button></div></div>`;
+        html += '<a href="login.html" class="homelinks">Connect Reddit account</a>';
     }
-  });
-document.getElementById('inboxbody').innerHTML = html;
-    }
-})
-.catch(error => {
-    console.error('Error fetching inbox messages:', error);
-});
 
-}
+    leftbar.insertAdjacentHTML('afterBegin', html);
 
-window.onload = function(){
-	const curq = getget('q') ? getget('q'): '';
-	let html1  =          '<form class="search" action="search.html"><input type="search" name="q" value="'+curq+'"/>';
-	html1 += '<input type="submit" value="Search"/><br style="clear:both;">';
-	    if (window.location.href.indexOf("?r=") > -1 || window.location.href.indexOf("&r=") > -1) {
-    html1 += '<input type="checkbox" id="chk1" name="r" value="'+getget('r')+'" checked><label for="chk1"> Only search r/'+getget('r')+'</label>';
+    if (isLoggedIn()) {
+        refreshSubs(false);
+        api.unreadCount().then(function (n) {
+            var badge = document.getElementById('unreadbadge');
+            if (badge && n > 0) { badge.textContent = ' (' + n + ')'; }
+        }).catch(function () { /* a badge is not worth surfacing an error for */ });
     }
-		    if (window.location.href.indexOf("?u=") > -1 || window.location.href.indexOf("&u=") > -1) {
-    html1 += '<input type="checkbox" id="chk1" name="u" value="'+getget('u')+'" checked><label for="chk1"> Only search u/'+getget('u')+'</label>';
-    }
-	
-		    if (window.location.href.indexOf("/r/") > -1) {
-				const ther = window.location.href.match(/r\/(.*?)\//s)[1];
-    html1 += '<input type="checkbox" id="chk1" name="r" value="'+ther+'" checked><label for="chk1"> Only search r/'+ther+'</label>';
-    }
-	html1 += '</form>';
-	if (localStorage.getItem('refreshToken') !== null) {
-		const uu = localStorage.getItem('userName');
-		html1 +=  '<a href="user.html?u=+'+uu+'" class="homelinks">'+uu+'</a>';
-		html1 +=  '<a href="inbox.html" class="homelinks half">Inbox</a>';
-		html1 +=  '<a href="login.html" class="homelinks half">Logout</a>';
-	}
-	
-	document.getElementById("leftbar").insertAdjacentHTML("afterBegin",
-          html1);
-
-	
-}
+};

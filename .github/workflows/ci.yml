@@ -46,7 +46,19 @@ jobs:
           for f in src/js/*.js; do node --check "$f"; done
 
       - name: Run tests
-        run: node test/render.test.js
+        run: |
+          set -euo pipefail
+          node test/render.test.js
+          node test/api.test.js
+
+      - name: Browser smoke test
+        run: |
+          set -euo pipefail
+          npm install --no-save playwright
+          npx playwright install --with-deps chromium
+          node test/smoke.test.js
+        env:
+          CHROMIUM_PATH: ''
 
       - name: Check build is idempotent
         run: |
