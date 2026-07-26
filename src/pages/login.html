@@ -1,148 +1,149 @@
-<!--#title Login -->
+<!--#title Connect to Reddit -->
 <!--#include head -->
 <!--#include simple-header -->
-    <style>#body {
-    padding: 15px;
+<style>
+#body { padding: 15px; }
+b, li { display: block; padding: 5px; margin: 5px; }
+ol { padding-left: 30px; line-height: 1.7; }
+ol li { display: list-item; padding: 2px; margin: 2px; }
+form { padding: 15px 0; }
+code {
+    background: var(--greyc);
+    padding: 2px 6px;
+    border-radius: 4px;
+    word-break: break-all;
 }
-b,li{display:block;padding:5px;margin:5px;}
-form {
-    padding: 15px;
-}
-
 input[type=text] {
     display: block;
-    padding: 5px 10px;
-    margin: 10px;
-    width: 79%;
-    border: 1px solid #aaa;
+    padding: 8px 10px;
+    margin: 10px 0;
+    width: 100%;
+    max-width: 420px;
+    box-sizing: border-box;
     border-radius: 5px;
     border: 1px solid var(--textc);
     background: var(--bodyc);
     color: var(--textc);
 }
-input[type=submit] {background: var(--linkc);color: var(--greyc);padding: 10px 30px;margin: 10px;border: 0px;cursor: pointer;border-radius: 10px;}
-
-</style>
-    <div id="authForm" style="display: none;">
-    <li>If you want to log in to RDX to be able to reply to posts etc. (very limited functionality ) </li><li> 1. Go to <a href="https://www.reddit.com/prefs/apps">https://www.reddit.com/prefs/apps</a> then login and create an app. </li><li> 2. Name it anything, select script(personal use) under use </li><li> 3. In the redirect url enter https://rdx.overdevs.com/login.html</li><li>4. Copy the client id (displayed below your username), client secret here and then authorise.</li>
-    
- <form>
-        <li >Client ID:</li>
-        <input type="text" id="clientId" required><br>
-        <li>Client Secret:</li>
-        <input type="text" id="clientSecret" required><br>
-        <input type="submit" value="Authorise">
-    </form>
-    <li>Everything is saved locally on your phone. RDX does not save your client secret and id anywhere except your phone. <br>After login you will be redirected to homepage.</li>
-</div>
-<div id="login" style="display: none;">
-Log in succesful! Redirecting you to homepage in 3 seconds!
-</div>
-<div id="logout" style="display: none;">You are currently logged in! <br><br><span onclick="logoutme();">Log out!</span></div>
-    
-
-</div>
-    <script>
-
-if(localStorage.getItem('color') == 'dark'){
-toggletheme('dark');
+input[type=submit] {
+    background: var(--linkc);
+    color: var(--bodyc);
+    padding: 10px 30px;
+    border: 0;
+    cursor: pointer;
+    border-radius: 10px;
+    font-size: 15px;
 }
-else {}
+.err {
+    background: var(--greyc);
+    border-left: 3px solid #d82c2b;
+    padding: 10px;
+    margin: 10px 0;
+}
+.muted { color: var(--lightc); font-size: 14px; }
+</style>
 
-function toggletheme(color){
-if(color == 'dark'){
-document.documentElement.style.setProperty('--bodyc', '#111222');
-document.documentElement.style.setProperty('--textc', 'white');
-document.documentElement.style.setProperty('--linkc', '#d9d983');
-document.documentElement.style.setProperty('--greyc', '#222233');
-document.documentElement.style.setProperty('--lightc', '#ddd');
-}}
- 
-    const authorizeUrl = 'https://www.reddit.com/api/v1/authorize';
-    const tokenUrl = 'https://www.reddit.com/api/v1/access_token';
-    const commentUrl = 'https://oauth.reddit.com/api/comment';
+<div id="setup" style="display:none;">
+    <b>Connect your Reddit account</b>
+    <p class="muted">Reddit disabled unauthenticated access in May 2026, so this
+    instance reads Reddit through your own account. It is a one-time setup.</p>
+    <ol>
+        <li>Open <a href="https://www.reddit.com/prefs/apps" target="_blank" rel="noreferrer">reddit.com/prefs/apps</a> and choose <b>create another app</b>.</li>
+        <li>Name it anything. Select <b>installed app</b> as the type.</li>
+        <li>Set the redirect URI to exactly:<br><code id="redirecturi"></code></li>
+        <li>Create it, then copy the client ID &mdash; the string just under the app name, <i>not</i> the one labelled secret.</li>
+    </ol>
+    <form id="setupform">
+        <label for="clientid">Client ID</label>
+        <input type="text" id="clientid" autocomplete="off" spellcheck="false" required>
+        <input type="submit" value="Connect">
+    </form>
+    <p class="muted">An installed app is a public client, so there is no secret
+    to enter or store. The client ID is kept in this browser only.</p>
+</div>
 
+<div id="working" style="display:none;">Connecting&hellip;</div>
 
-    function redirectToAuth() {
-        const clientId = localStorage.getItem('clientId');
-        const clientSecret = localStorage.getItem('clientSecret');
-        const redirectUri = 'https://rdx.overdevs.com/login.html'; 
-        
-        if (!clientId || !clientSecret) {
-            document.getElementById('authForm').style.display = 'block';
+<div id="done" style="display:none;">Connected. Returning to the home page&hellip;</div>
 
-            document.getElementById('authForm').addEventListener('submit', async (e) => {
-                e.preventDefault();
-                const inputClientId = document.getElementById('clientId').value;
-                const inputClientSecret = document.getElementById('clientSecret').value;
+<div id="loggedin" style="display:none;">
+    <b>Connected as <span id="who"></span></b>
+    <p><a href="index.html">Go to the home page</a></p>
+    <p><span class="linky" onclick="doLogout();" style="color:var(--linkc);cursor:pointer;">Disconnect this account</span></p>
+</div>
 
-                localStorage.setItem('clientId', inputClientId);
-                localStorage.setItem('clientSecret', inputClientSecret);
+<div id="failed" style="display:none;">
+    <div class="err"><b>Could not connect</b><div id="failmsg"></div></div>
+    <p><span style="color:var(--linkc);cursor:pointer;" onclick="restart();">Start over</span></p>
+</div>
+</div>
+<!--#include scripts -->
+<script>
+function show(id) {
+    ['setup', 'working', 'done', 'loggedin', 'failed'].forEach(function (s) {
+        document.getElementById(s).style.display = (s === id) ? 'block' : 'none';
+    });
+}
 
-               
-                const authUrl = `${authorizeUrl}?client_id=${inputClientId}&response_type=code&state=random_state&redirect_uri=${encodeURIComponent(redirectUri)}&duration=permanent&scope=submit,edit,identity,vote,privatemessages`;
-                window.location.href = authUrl;
-            });
-        } 
-        else if(localStorage.getItem('userName')) {
-        	   document.getElementById('logout').style.display = 'block';
+function fail(msg) {
+    document.getElementById('failmsg').textContent = msg;
+    show('failed');
+}
 
-        	
-        }
-        else {
-      
-            const urlParams = new URLSearchParams(window.location.search);
-            const code = urlParams.get('code');
-            if (code) {
-                fetch(tokenUrl, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/x-www-form-urlencoded',
-                        'Authorization': `Basic ${btoa(`${clientId}:${clientSecret}`)}`,
-                    },
-                    body: `grant_type=authorization_code&code=${code}&redirect_uri=${encodeURIComponent(redirectUri)}`,
-                })
-                .then(response => response.json())
-                .then(tokenData => {
-                    const accessToken = tokenData.access_token;
-                    const refreshToken = tokenData.refresh_token;
-                    const expiresIn = tokenData.expires_in; // Expires in seconds
+function restart() {
+    logout();
+    window.location.href = 'login.html';
+}
 
-                    const expirationTimestamp = Date.now() + (expiresIn * 1000);
+function doLogout() {
+    logout();
+    window.location.href = 'index.html';
+}
 
-                    localStorage.setItem('accessToken', accessToken);
-                    localStorage.setItem('refreshToken', refreshToken);
-                    localStorage.setItem('expiresIn', expirationTimestamp.toString());
-                    fetch('https://oauth.reddit.com/api/v1/me', {
-  headers: {
-    'Authorization': 'Bearer '+accessToken
-  }
-})
-  .then(response => response.json())
-  .then(data => localStorage.setItem('userName', data.name))
-  .catch(error => console.error('Error:', error));
- document.getElementById('login').style.display = 'block';
- setTimeout(() => {
-                    window.location.href = 'index.html';
-                    }, 3000);
-                })
-                .catch(error => {
-                    alert('Error:', error);
-                });
-            }
-        }
+function start() {
+    document.getElementById('redirecturi').textContent = redirectUri();
+
+    var params = new URLSearchParams(window.location.search);
+    var code = params.get('code');
+    var returnedState = params.get('state');
+    var oauthError = params.get('error');
+
+    // Reddit bounced us back with a refusal (usually the user pressed Decline).
+    if (oauthError) {
+        fail(oauthError === 'access_denied'
+            ? 'Access was declined on Reddit. Nothing was saved.'
+            : 'Reddit reported: ' + oauthError);
+        return;
     }
 
-redirectToAuth();
-function logoutme(){
-localStorage.removeItem('userName');
-localStorage.removeItem('clientId');
-localStorage.removeItem('clientSecret');
-localStorage.removeItem('accessToken');
-localStorage.removeItem('expiresIn');
-localStorage.removeItem('refreshToken');
-window.location.href = 'index.html';
+    if (code) {
+        show('working');
+        completeAuth(code, returnedState).then(function () {
+            show('done');
+            setTimeout(function () { window.location.href = 'index.html'; }, 3000);
+        }).catch(function (err) {
+            fail(err && err.message ? err.message : String(err));
+        });
+        return;
+    }
+
+    if (isLoggedIn()) {
+        document.getElementById('who').textContent = currentUser() || 'your account';
+        show('loggedin');
+        return;
+    }
+
+    show('setup');
+    var existing = getClientId();
+    if (existing) { document.getElementById('clientid').value = existing; }
+    document.getElementById('setupform').addEventListener('submit', function (e) {
+        e.preventDefault();
+        var id = document.getElementById('clientid').value.trim();
+        if (!id) { return; }
+        beginAuth(id);
+    });
 }
-    
-    </script>
+
+start();
+</script>
 <!--#include footer -->
