@@ -1,0 +1,100 @@
+<!--#title Settings -->
+<!--#include head -->
+<!--#include simple-header -->
+<style>
+#body { padding: 15px; }
+b, li { display: block; padding: 5px; margin: 5px; }
+.muted { color: var(--lightc); font-size: 14px; padding: 5px; }
+button {
+    background: var(--linkc);
+    color: var(--bodyc);
+    padding: 8px 18px;
+    border: 0;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 15px;
+}
+</style>
+
+<b>Account</b>
+<li id="accountline">&hellip;</li>
+
+<b>Subscriptions</b>
+<li class="muted">Your subreddits come from your Reddit account and are cached
+locally. They refresh automatically every few hours.</li>
+<li><button onclick="doRefreshSubs()">Refresh now</button> <span id="subsstatus"></span></li>
+
+<b>Display</b>
+<li id="cthemew"><a href="themes.html" style="color:var(--linkc)">Change theme and font</a></li>
+
+<b>Posts per page</b>
+<li>
+    <input id="ppg" type="range" min="10" max="60" step="5" onchange="changedppg();"/>
+    <span id="outppg">20</span>
+</li>
+
+<b>Enable infinite scrolling: <input type="checkbox" id="infibox" onchange="checkinfi();"></b>
+<b>Enable compact mode: <input type="checkbox" id="compbox" onchange="compchng();"></b>
+
+<b>Rate limit</b>
+<li class="muted" id="ratelimit">Reddit allows 100 requests per minute for this
+client. Normal browsing uses a small fraction of that.</li>
+</div>
+<!--#include scripts -->
+<script>
+// Display preferences
+var curcomp = localStorage.getItem('curmode') || "original";
+if (curcomp == "comp") { document.getElementById("compbox").checked = true; }
+function compchng() {
+    localStorage.setItem('curmode', document.getElementById("compbox").checked ? 'comp' : 'original');
+}
+
+var curpp = localStorage.getItem('ppg') || 20;
+document.getElementById('outppg').innerHTML = curpp;
+document.getElementById('ppg').value = curpp;
+function changedppg() {
+    localStorage.setItem('ppg', document.getElementById('ppg').value);
+    document.getElementById('outppg').innerHTML = document.getElementById('ppg').value + " (saved)";
+}
+
+document.getElementById("infibox").checked = localStorage.getItem('curinfi') === "true";
+function checkinfi() {
+    localStorage.setItem('curinfi', document.getElementById("infibox").checked);
+}
+
+// Account
+(function () {
+    var line = document.getElementById('accountline');
+    if (isLoggedIn()) {
+        line.innerHTML = 'Connected as <b>' + (currentUser() || 'unknown') + '</b> &mdash; ' +
+            '<a href="login.html" style="color:var(--linkc)">manage</a>';
+    } else {
+        line.innerHTML = '<a href="login.html" style="color:var(--linkc)">Connect your Reddit account</a>';
+    }
+}());
+
+// Subscriptions. The bookmarklet-and-JSON-file import this replaces asked you
+// to paste a script into old.reddit.com to scrape your own subscription list,
+// because the app had no way to read it. It can now just ask Reddit.
+function doRefreshSubs() {
+    var status = document.getElementById('subsstatus');
+    if (!isLoggedIn()) { status.textContent = 'Connect your account first.'; return; }
+    status.textContent = 'Refreshing...';
+    refreshSubs(true).then(function (names) {
+        status.textContent = names.length + ' subreddits.';
+    }).catch(function (e) {
+        status.textContent = 'Failed: ' + (e && e.message ? e.message : e);
+    });
+}
+
+(function () {
+    var n = cachedSubs().length;
+    if (n) { document.getElementById('subsstatus').textContent = n + ' cached.'; }
+    var rl = rateLimitRemaining();
+    if (rl !== null) {
+        document.getElementById('ratelimit').textContent =
+            'Roughly ' + rl + ' requests remaining in the current Reddit rate-limit window.';
+    }
+}());
+</script>
+<!--#include footer -->

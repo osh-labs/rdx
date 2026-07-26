@@ -1,0 +1,47 @@
+<!--#title Search -->
+<!--#include head -->
+<!--#include chrome -->
+<script>
+function doit(){
+    var query = getget('q') || '';
+    var sub = getget('r');
+    var user = getget('u');
+
+    // Scope carried in the sort links. Upstream concatenated "&r=..." into the
+    // query string itself, so the scope leaked into the search terms.
+    var scope = (sub ? '&r=' + encodeURIComponent(sub) : '') +
+                (user ? '&u=' + encodeURIComponent(user) : '');
+    var base = 'search.html?q=' + encodeURIComponent(query) + scope;
+    document.getElementById('rightbar').innerHTML =
+        '<a href="' + base + '&sort=relevance">Relevance</a>' +
+        '<a href="' + base + '&sort=new">New</a>' +
+        '<a href="' + base + '&sort=hot">Hot</a>' +
+        '<a href="' + base + '&sort=top">Top</a>' +
+        '<a href="' + base + '&sort=top&t=month">Top (month)</a>' +
+        '<a href="' + base + '&sort=top&t=year">Top (year)</a>' +
+        '<a href="' + base + '&sort=top&t=all">Top (all)</a>';
+
+    document.getElementById('pagetitletext').innerHTML = query || 'Search';
+    document.title = query ? 'Search: ' + query : 'Search';
+
+    if (!query) {
+        document.getElementById('body').innerHTML =
+            '<div class="notice"><p>Enter a search term.</p></div>';
+        return;
+    }
+
+    // Restricting to an author is a query operator, not a listing scope.
+    var q = user ? 'author:' + user + ' ' + query : query;
+
+    loadListing(function (o) { return api.search(q, o); }, {
+        subreddit: sub,
+        sort: getget('sort'),
+        t: getget('t'),
+        after: getget('after'),
+        before: getget('before'),
+    });
+}
+
+doit();
+</script>
+<!--#include footer -->

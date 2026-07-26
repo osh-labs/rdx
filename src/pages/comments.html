@@ -1,0 +1,260 @@
+<!--#title rdx -->
+<!--#include head -->
+<!--#include chrome -->
+<div id="paginate"></div>
+<script>
+var fill = '';
+var morejson = [];
+var pagenum = 0;
+
+// Resolve the target thread from the ?url= parameter. Only the path matters
+// now -- the host is always oauth.reddit.com -- so the old rewrites for the
+// amp/m/i/old.reddit.com hostnames collapse into "take the pathname".
+function permalinkFromUrl(raw) {
+    if (!raw) { return null; }
+    try {
+        return new URL(raw, 'https://www.reddit.com').pathname;
+    } catch (e) {
+        return raw.charAt(0) === '/' ? raw : null;
+    }
+}
+
+function doit(){
+    var raw = getget('url');
+    var permalink = permalinkFromUrl(raw);
+    if (!permalink) {
+        document.getElementById('body').innerHTML =
+            '<div class="notice"><p>No post specified.</p></div>';
+        return;
+    }
+
+    var base = 'comments.html?url=' + encodeURIComponent(raw);
+    document.getElementById('rightbar').innerHTML =
+        '<a href="' + base + '&sort=best">Best</a>' +
+        '<a href="' + base + '&sort=top">Top</a>' +
+        '<a href="' + base + '&sort=new">New</a>' +
+        '<a href="' + base + '&sort=controversial">Controversial</a>' +
+        '<a href="' + base + '&sort=old">Old</a>' +
+        '<a href="' + base + '&sort=qa">QnA</a>' +
+        '<a onclick="saveit(this)" id="savebutton" style="border-top: 5px solid var(--greyc);">Save</a>' +
+        '<a onclick="shareit();" id="sharebutton">Share</a>';
+
+    if (!isLoggedIn()) { renderConnectPrompt(); return; }
+    document.getElementById('body').innerHTML = '<div class="notice"><p>Loading&hellip;</p></div>';
+
+    api.comments(permalink, { sort: getget('sort') }).then(function (res) {
+        // The comments endpoint answers with [postListing, commentListing].
+        thisthread = res[0]['data']['children'][0]['data'];
+        document.getElementById('body').innerHTML = postbuilder(thisthread);
+        document.getElementById('pagetitletext').innerHTML = thisthread['subreddit'];
+        document.title = thisthread['title'];
+        var savebtn = document.getElementById('savebutton');
+        if (savebtn && thisthread['saved']) {
+            savebtn.setAttribute('data-saved', '1');
+            savebtn.innerHTML = 'Saved';
+        }
+        fill = '';
+        loadcomments(res[1]['data']['children']);
+        runhsl();
+    }).catch(renderError);
+}
+
+// Renders a reply tree. Replaces three near-identical functions (one per
+// nesting level, capped at 3 deep) that each built the "View other replies"
+// link from the ENCLOSING level's loop variables rather than their own -- so
+// the link pointed at whichever comment that variable happened to hold.
+//
+// A `more` node carries no permalink of its own, which is why the original
+// reached outward. The parent's permalink is now passed down explicitly, and
+// recursion replaces the hand-unrolled levels (the CSS styles ccp0-ccp5).
+function handlereplies(replies, parentPermalink){
+    const children = replies['data']['children'];
+    for (const idx in children) {
+        const node = children[idx];
+        if (node['kind'] == "more") {
+            fill += '<div class="comment ccp'+ node['data']['depth'] +'"><div class="comment_author"><a href="?url=https://www.reddit.com'+ parentPermalink +'" target="_blank">View other replies</a></div></div>';
+        } else {
+            const data = node['data'];
+            fill += cbuilder(data);
+            const nested = data['replies'];
+            if (typeof nested === 'object' && nested !== null) {
+                handlereplies(nested, data['permalink']);
+            }
+        }
+    }
+}
+
+function loadcomments(comments){
+for (const item in comments) {
+    const node = comments[item];
+    // A top-level `more` node is the "Load More" pagination stub, not a
+    // comment. The old code set up the button and then ALSO ran it through
+    // cbuilder, rendering an empty comment with no author or body.
+    if (node.kind == 'more') {
+        morejson = node.data.children;
+        document.getElementById('paginate').innerHTML = '<button onclick="loadmore()" id="loadmore1">Load More</button>';
+        continue;
+    }
+    const data = node['data'];
+    fill += cbuilder(data);
+    const replies = data['replies'];
+    if (typeof replies === 'object' && replies !== null) {
+        handlereplies(replies, data['permalink']);
+    }
+}
+document.getElementById('body').innerHTML += '<div class="clear"></div>'+fill;
+const commentsdivs = document.getElementById('body').getElementsByClassName('comment');
+for (let i = 0; i < commentsdivs.length; i++) {
+    commentsdivs[i].addEventListener('dblclick', collapse);
+}
+}
+
+// Expand a truncated comment tree. Reddit caps how many ids one call may
+// expand, so this walks `morejson` in batches.
+var MORECHILDREN_BATCH = 100;
+
+function loadmore(){
+    var btn = document.getElementById('loadmore1');
+    if (btn) { btn.disabled = true; btn.innerHTML = 'Loading...'; }
+
+    var batch = morejson.slice(pagenum * MORECHILDREN_BATCH,
+                               (pagenum + 1) * MORECHILDREN_BATCH);
+    if (!batch.length) {
+        document.getElementById('paginate').innerHTML = '';
+        return;
+    }
+    pagenum += 1;
+
+    api.moreChildren(thisthread['name'], batch).then(function (res) {
+        fill = '';
+        var things = (res && res.json && res.json.data && res.json.data.things) || [];
+        loadcomments(things);
+
+        // Only offer the button again if ids remain.
+        if (pagenum * MORECHILDREN_BATCH < morejson.length) {
+            document.getElementById('paginate').innerHTML =
+                '<button onclick="loadmore()" id="loadmore1">Load More</button>';
+        } else {
+            document.getElementById('paginate').innerHTML = '';
+        }
+    }).catch(function (err) {
+        document.getElementById('paginate').innerHTML =
+            '<div class="notice"><p>Could not load more comments.' +
+            (err && err.message ? ' <small>' + err.message + '</small>' : '') + '</p></div>';
+    });
+}
+
+function collapse(){
+thisp = document.getElementById(this.id);
+curx = thisp; curindex = Math.abs(thisp.classList[1].replace('ccp',''));
+
+if(thisp.getAttribute('iscollasped') == '1'){
+while(nxsb = curx.nextSibling) {
+if(nxsb.classList.contains('comment')) {
+thisindex = Math.abs(nxsb.classList[1].replace('ccp',''));
+
+if(thisindex > curindex) {
+nxsb.style.display = 'block';
+}
+else {break;}
+}
+else {
+nxsb.style.display = 'block';
+}
+console.log(nxsb);
+curx = nxsb;
+
+
+}
+
+thisp.classList.toggle('collapsed');
+thisp.setAttribute('iscollasped','0');
+
+}
+else {
+
+while(nxsb = curx.nextSibling) {
+if(nxsb.classList.contains('comment')) {
+thisindex = Math.abs(nxsb.classList[1].replace('ccp',''));
+
+if(thisindex > curindex) {
+nxsb.style.display = 'none';
+}
+else {break;}
+}
+else {
+nxsb.style.display = 'none';
+}
+console.log(nxsb);
+curx = nxsb;
+
+
+}
+thisp.classList.toggle('collapsed');
+thisp.setAttribute('iscollasped','1');
+
+}
+}
+
+
+
+doit();
+
+
+function opencmenu(cid){
+cidi = document.getElementById(cid).getAttribute('menushown');
+if(cidi == 'yes'){
+document.getElementById(cid+'cc').remove();
+	  document.getElementById(cid).setAttribute('menushown','no');
+	  console.log('yy');
+}
+else {
+htmltoc = '<div class="cmenu" id="'+cid+'cc"><a onclick="">Save</a></div>';
+	document.getElementById(cid).insertAdjacentHTML("afterBegin",
+          htmltoc);
+ document.getElementById(cid).setAttribute('menushown','yes');		 
+		 }
+		 
+
+}
+
+</script>
+
+<style>
+.postc.selftext {
+    word-break: break-word;
+    font-size: 15px;
+    max-height: none;
+    overflow: hidden;
+	box-shadow: inset 0 -15px 5px -7px #ddd;
+	box-shadow: none;
+    padding-bottom: 0px;
+}
+.cmenu {
+    text-align: right;
+    font-size: 15px;
+    margin: 0 auto;
+	position: absolute;
+    right: 50px;
+}
+
+.cmenu a {
+    background: var(--bodyc);
+    padding: 2px 10px;
+  
+    box-shadow: 1px 1px 3px #00000055;
+}
+.cmenu a:nth-child(1)
+{
+border-radius:5px 0px 0px 5px;
+}
+
+.cmenu a:nth-child(3)
+{
+border-radius:0px 5px 5px 0px;
+}
+
+
+</style>
+<!--#include reply-modal -->
+<!--#include footer -->

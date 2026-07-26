@@ -1,0 +1,39 @@
+<!--#title rdx -->
+<!--#include head -->
+<!--#include chrome -->
+<script>
+function doit(){
+    var sub = getget('r');
+    if (!sub) { window.location.href = 'index.html'; return; }
+
+    var base = 'subreddit.html?r=' + encodeURIComponent(sub);
+    // "Best" is not a valid subreddit sort -- it only exists on the front
+    // page. Upstream offered it here and produced /r/x/best.
+    var links =
+        '<a href="' + base + '&sort=hot">Hot</a>' +
+        '<a href="' + base + '&sort=new">New</a>' +
+        '<a href="' + base + '&sort=rising">Rising</a>' +
+        '<a href="' + base + '&sort=top">Top</a>' +
+        '<a href="' + base + '&sort=top&t=week">Top (week)</a>' +
+        '<a href="' + base + '&sort=top&t=month">Top (month)</a>' +
+        '<a href="' + base + '&sort=top&t=year">Top (year)</a>' +
+        '<a href="' + base + '&sort=top&t=all">Top (all)</a>' +
+        '<a onclick="shareit();" id="sharebutton">Share</a>' +
+        '<a id="subbtn">&hellip;</a>';
+    document.getElementById('rightbar').innerHTML = links;
+    refreshSubButton(sub);
+
+    document.getElementById('pagetitletext').innerHTML = sub;
+    document.title = 'r/' + sub;
+
+    loadListing(function (o) { return api.subreddit(sub, o); }, {
+        sort: getget('sort'),
+        t: getget('t'),
+        after: getget('after'),
+        before: getget('before'),
+    });
+}
+
+doit();
+</script>
+<!--#include footer -->

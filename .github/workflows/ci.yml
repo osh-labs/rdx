@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+# Read-only. The previous workflow granted twelve write scopes to
+# GITHUB_TOKEN and force-pushed generated files back to main.
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lint build script
+        run: shellcheck build.sh
+
+      - name: Build
+        run: ./build.sh
+
+      - name: Check expected output exists
+        run: |
+          set -euo pipefail
+          for f in index.html subreddit.html comments.html search.html \
+                   user.html userc.html saved.html settings.html \
+                   themes.html login.html inbox.html \
+                   functions.js styles.css manifest.json favicon.ico; do
+            test -s "dist/$f" || { echo "missing or empty: dist/$f"; exit 1; }
+          done
+
+      - name: Check no unexpanded build markers survived
+        run: |
+          set -euo pipefail
+          if grep -rn '{{TITLE}}\|<!--#include\|<!--#title' dist/; then
+            echo "unexpanded build markers in output"; exit 1
+          fi
+
+      - name: Syntax-check JavaScript
+        run: |
+          set -euo pipefail
+          for f in src/js/*.js; do node --check "$f"; done
+
+      - name: Run tests
+        run: |
+          set -euo pipefail
+          node test/render.test.js
+          node test/api.test.js
+
+      - name: Browser smoke test
+        run: |
+          set -euo pipefail
+          npm install --no-save playwright
+          npx playwright install --with-deps chromium
+          node test/smoke.test.js
+        env:
+          CHROMIUM_PATH: ''
+
+      - name: Check build is idempotent
+        run: |
+          set -euo pipefail
+          cp -r dist /tmp/dist-first
+          ./build.sh
+          diff -r /tmp/dist-first dist

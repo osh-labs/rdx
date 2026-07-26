@@ -1,0 +1,50 @@
+<!--#title rdx -->
+<!--#include head -->
+<!--#include chrome -->
+<script>
+// A user's comments are Listing children of kind t1, so they render through
+// cbuilder wrapped in the context of the post they were made on. This page
+// had its own inline XHR; it now shares the listing transport, which also
+// gives it infinite scroll and pagination it never had.
+function cpostbuilder(comment){
+    var out = '<div class="post" id="' + comment['id'] + '">' +
+        '<div class="post_author">' +
+        '<a href="subreddit.html?r=' + comment["subreddit"] + '">' + comment["subreddit_name_prefixed"] + '</a>' +
+        ' &bull; <a href="user.html?u=' + comment["link_author"] + '">' + comment["link_author"] + '</a></div>' +
+        '<div class="post_link"><a href="comments.html?url=https://www.reddit.com' + comment['permalink'] + '">' +
+        comment['link_title'] + '</a></div>';
+    out += cbuilder(comment);
+    out += '</div>';
+    return out;
+}
+
+function doit(){
+    var username = getget('u');
+    if (!username) { window.location.href = 'index.html'; return; }
+
+    var base = 'userc.html?u=' + encodeURIComponent(username);
+    document.getElementById('rightbar').innerHTML =
+        '<a href="user.html?u=' + encodeURIComponent(username) + '">Posts</a>' +
+        '<a href="' + base + '&sort=new">New</a>' +
+        '<a href="' + base + '&sort=hot">Hot</a>' +
+        '<a href="' + base + '&sort=top">Top</a>' +
+        '<a href="' + base + '&sort=top&t=month">Top (month)</a>' +
+        '<a href="' + base + '&sort=top&t=all">Top (all)</a>' +
+        '<a onclick="shareit();" id="sharebutton">Share</a>';
+
+    document.getElementById('pagetitletext').innerHTML = username;
+    document.title = 'u/' + username + ' comments';
+
+    // Render comments rather than posts for this listing.
+    setListingRenderer(cpostbuilder);
+    loadListing(function (o) { return api.userComments(username, o); }, {
+        sort: getget('sort'),
+        t: getget('t'),
+        after: getget('after'),
+        before: getget('before'),
+    });
+}
+
+doit();
+</script>
+<!--#include footer -->

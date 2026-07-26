@@ -1,0 +1,32 @@
+<!--#title rdx -->
+<!--#include head -->
+<!--#include chrome -->
+<script>
+function doit(){
+    var username = getget('u');
+    if (!username) { window.location.href = 'index.html'; return; }
+
+    var base = 'user.html?u=' + encodeURIComponent(username);
+    document.getElementById('rightbar').innerHTML =
+        '<a href="userc.html?u=' + encodeURIComponent(username) + '">Comments</a>' +
+        '<a href="' + base + '&sort=hot">Hot</a>' +
+        '<a href="' + base + '&sort=new">New</a>' +
+        '<a href="' + base + '&sort=top">Top</a>' +
+        '<a href="' + base + '&sort=top&t=month">Top (month)</a>' +
+        '<a href="' + base + '&sort=top&t=all">Top (all)</a>' +
+        '<a onclick="shareit();" id="sharebutton">Share</a>';
+
+    document.getElementById('pagetitletext').innerHTML = username;
+    document.title = 'u/' + username;
+
+    loadListing(function (o) { return api.userPosts(username, o); }, {
+        sort: getget('sort'),
+        t: getget('t'),
+        after: getget('after'),
+        before: getget('before'),
+    });
+}
+
+doit();
+</script>
+<!--#include footer -->
