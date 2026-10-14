@@ -1,5 +1,8 @@
 # RDX on AWS: Serverless Implementation Plan
 
+> **Superseded (2026-10-14).** Phase 0 failed: a usable Data API app could not be obtained. This plan is kept for
+> reference only. See [`devvit-evaluation.md`](devvit-evaluation.md) for the path being evaluated instead.
+
 **Date:** 2026-10-14
 **Goal:** Run the fork end to end on AWS using the architecture of `osh-labs/SEM-Configurator`: CloudFront in front of a private S3 site bucket and a Lambda container behind `/api/*`, a CloudFront Function login gate, a retained S3 state bucket, and GitHub Actions deploying via OIDC.
 
