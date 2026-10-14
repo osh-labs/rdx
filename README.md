@@ -8,6 +8,12 @@ Upstream is abandoned. In May 2026 Reddit
 which is what the original depended on entirely, and it has not worked since.
 This fork reads Reddit through your own account instead.
 
+> **Reddit API status (2026-10-14).** Reddit closed self-service API access on
+> 2025-11-11, so the "create an app" step below no longer works; only apps created
+> before then still function, and they must be registered by 2027-01-12. Reddit has
+> also announced that public API access ends by March 2027. See
+> [`docs/serverless-plan.md`](docs/serverless-plan.md) §0 before building anything.
+
 ## What it is
 
 A static site. No backend, no database, no build toolchain, no dependencies.
